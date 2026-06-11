@@ -1,0 +1,15 @@
+.idea/
+.vscode/
+.claude/
+.agents/
+.codex/
+node_modules/
+dist/
+target/
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+*.log
+.mvn/wrapper/apache-maven-*/
+.mvn/wrapper/*.zip
