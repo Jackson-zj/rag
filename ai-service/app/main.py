@@ -18,10 +18,18 @@ except Exception:
     END = None
     StateGraph = None
 
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except Exception:
+    psycopg = None
+    dict_row = None
+
 app = FastAPI(title="Enterprise RAG AI Service", version="0.1.0")
 Instrumentator().instrument(app).expose(app)
 
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "64"))
+VECTOR_DATABASE_URL = os.getenv("VECTOR_DATABASE_URL", "")
 MODEL_BASE_URL = os.getenv("MODEL_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 MODEL_API_KEY = os.getenv("MODEL_API_KEY") or os.getenv("DASHSCOPE_API_KEY", "")
 MODEL_NAME = os.getenv("MODEL_NAME", "qwen3.7-plus")
@@ -40,6 +48,7 @@ class IndexRequest(BaseModel):
     knowledge_base_id: str
     filename: str
     content: str
+    content_hash: str | None = None
     allowed_user_ids: list[str] = Field(default_factory=list)
 
 
@@ -212,6 +221,177 @@ def embed(text: str) -> list[float]:
 
 def cosine(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
+
+
+def postgres_enabled() -> bool:
+    return bool(VECTOR_DATABASE_URL)
+
+
+def postgres_connection():
+    if psycopg is None or dict_row is None:
+        raise RuntimeError("VECTOR_DATABASE_URL is configured, but psycopg is not installed")
+    return psycopg.connect(VECTOR_DATABASE_URL, row_factory=dict_row)
+
+
+def stable_content_hash(content: str) -> str:
+    normalized = "\n".join(line.rstrip() for line in content.replace("\r\n", "\n").replace("\r", "\n").split("\n")).strip()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def vector_sql_literal(vector: list[float]) -> str:
+    return "[" + ",".join(f"{value:.10f}" for value in vector) + "]"
+
+
+def ensure_postgres_knowledge_base(cursor, knowledge_base_id: str) -> None:
+    cursor.execute(
+        """
+        INSERT INTO knowledge_bases (id, name, description)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        (knowledge_base_id, knowledge_base_id, "Created by AI indexing service"),
+    )
+
+
+def index_document_in_memory(request: IndexRequest, chunks: list[str]) -> dict[str, Any]:
+    CHUNKS[:] = [chunk for chunk in CHUNKS if chunk["document_id"] != request.document_id]
+    for position, chunk in enumerate(chunks):
+        CHUNKS.append(
+            {
+                "chunk_id": f"{request.document_id}-{position}",
+                "document_id": request.document_id,
+                "knowledge_base_id": request.knowledge_base_id,
+                "filename": request.filename,
+                "position": position,
+                "text": chunk,
+                "embedding": embed(chunk),
+                "allowed_user_ids": request.allowed_user_ids,
+            }
+        )
+    return {"document_id": request.document_id, "status": "READY", "chunk_count": len(chunks), "duplicate": False}
+
+
+def index_document_in_postgres(request: IndexRequest) -> dict[str, Any]:
+    content_hash = request.content_hash or stable_content_hash(request.content)
+    with postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            ensure_postgres_knowledge_base(cursor, request.knowledge_base_id)
+            cursor.execute(
+                """
+                SELECT id, status, chunk_count
+                FROM documents
+                WHERE knowledge_base_id = %s AND content_hash = %s
+                """,
+                (request.knowledge_base_id, content_hash),
+            )
+            existing = cursor.fetchone()
+            if existing is not None:
+                return {
+                    "document_id": existing["id"],
+                    "status": existing["status"],
+                    "chunk_count": existing["chunk_count"],
+                    "duplicate": True,
+                }
+
+            chunks = split_text(request.content)
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO documents (id, knowledge_base_id, filename, status, content_hash, chunk_count)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (request.document_id, request.knowledge_base_id, request.filename, "READY", content_hash, len(chunks)),
+                )
+            except Exception:
+                connection.rollback()
+                with connection.cursor() as retry_cursor:
+                    retry_cursor.execute(
+                        """
+                        SELECT id, status, chunk_count
+                        FROM documents
+                        WHERE knowledge_base_id = %s AND content_hash = %s
+                        """,
+                        (request.knowledge_base_id, content_hash),
+                    )
+                    existing = retry_cursor.fetchone()
+                    if existing is not None:
+                        return {
+                            "document_id": existing["id"],
+                            "status": existing["status"],
+                            "chunk_count": existing["chunk_count"],
+                            "duplicate": True,
+                        }
+                raise
+
+            for position, chunk in enumerate(chunks):
+                cursor.execute(
+                    """
+                    INSERT INTO document_chunks
+                        (id, document_id, knowledge_base_id, filename, position, content, embedding, allowed_user_ids)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s)
+                    """,
+                    (
+                        f"{request.document_id}-{position}",
+                        request.document_id,
+                        request.knowledge_base_id,
+                        request.filename,
+                        position,
+                        chunk,
+                        vector_sql_literal(embed(chunk)),
+                        request.allowed_user_ids,
+                    ),
+                )
+    return {"document_id": request.document_id, "status": "READY", "chunk_count": len(chunks), "duplicate": False}
+
+
+def search_chunks_in_memory(request: SearchRequest, query_vector: list[float]) -> list[dict[str, Any]]:
+    visible = []
+    for chunk in CHUNKS:
+        if chunk["knowledge_base_id"] not in request.knowledge_base_ids:
+            continue
+        if chunk["allowed_user_ids"] and request.user_id not in chunk["allowed_user_ids"]:
+            continue
+        if not is_readable_text(chunk["text"]):
+            continue
+        vector_score = cosine(query_vector, chunk["embedding"])
+        visible.append({**chunk, "vector_score": vector_score})
+    visible.sort(key=lambda item: item["vector_score"], reverse=True)
+    return visible
+
+
+def search_chunks_in_postgres(request: SearchRequest, query_vector: list[float]) -> list[dict[str, Any]]:
+    if not request.knowledge_base_ids:
+        return []
+    limit = max(request.top_k * 8, request.top_k)
+    with postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id AS chunk_id,
+                    document_id,
+                    knowledge_base_id,
+                    filename,
+                    position,
+                    content AS text,
+                    allowed_user_ids,
+                    1 - (embedding <=> %s::vector) AS vector_score
+                FROM document_chunks
+                WHERE knowledge_base_id = ANY(%s)
+                  AND (cardinality(allowed_user_ids) = 0 OR %s = ANY(allowed_user_ids))
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+                """,
+                (
+                    vector_sql_literal(query_vector),
+                    request.knowledge_base_ids,
+                    request.user_id,
+                    vector_sql_literal(query_vector),
+                    limit,
+                ),
+            )
+            rows = cursor.fetchall()
+    return [dict(row) for row in rows if is_readable_text(str(row["text"]))]
 
 
 def lexical_overlap_score(query: str, text: str) -> float:
@@ -662,38 +842,15 @@ def parse_document(request: ParseRequest) -> dict[str, Any]:
 
 @app.post("/ai/documents/index")
 def index_document(request: IndexRequest) -> dict[str, Any]:
-    chunks = split_text(request.content)
-    CHUNKS[:] = [chunk for chunk in CHUNKS if chunk["document_id"] != request.document_id]
-    for position, chunk in enumerate(chunks):
-        CHUNKS.append(
-            {
-                "chunk_id": f"{request.document_id}-{position}",
-                "document_id": request.document_id,
-                "knowledge_base_id": request.knowledge_base_id,
-                "filename": request.filename,
-                "position": position,
-                "text": chunk,
-                "embedding": embed(chunk),
-                "allowed_user_ids": request.allowed_user_ids,
-            }
-        )
-    return {"document_id": request.document_id, "status": "READY", "chunk_count": len(chunks)}
+    if postgres_enabled():
+        return index_document_in_postgres(request)
+    return index_document_in_memory(request, split_text(request.content))
 
 
 @app.post("/ai/rag/search")
 def rag_search(request: SearchRequest) -> dict[str, Any]:
     query_vector = embed(request.query)
-    visible = []
-    for chunk in CHUNKS:
-        if chunk["knowledge_base_id"] not in request.knowledge_base_ids:
-            continue
-        if chunk["allowed_user_ids"] and request.user_id not in chunk["allowed_user_ids"]:
-            continue
-        if not is_readable_text(chunk["text"]):
-            continue
-        vector_score = cosine(query_vector, chunk["embedding"])
-        visible.append({**chunk, "vector_score": vector_score})
-    visible.sort(key=lambda item: item["vector_score"], reverse=True)
+    visible = search_chunks_in_postgres(request, query_vector) if postgres_enabled() else search_chunks_in_memory(request, query_vector)
     candidates = visible[: max(request.top_k * 8, request.top_k)]
     for item in candidates:
         item["score"] = rerank_score(request.query, item)

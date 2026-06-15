@@ -23,6 +23,8 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -57,6 +59,7 @@ record ChatSessionView(String id, String userId, String title, List<String> know
 record ChatMessageView(String id, String sessionId, String role, String content, Instant createdAt) {}
 record ChatRequest(String question) {}
 record AgentResponse(String answer, List<Map<String, Object>> citations, List<Map<String, Object>> tool_calls) {}
+record AiIndexResponse(String document_id, String status, int chunk_count, boolean duplicate) {}
 
 class DemoStore {
     final Map<String, String> tokens = new ConcurrentHashMap<>();
@@ -140,26 +143,41 @@ class ApiController {
         String id = "doc-" + UUID.randomUUID();
         DocumentView doc = new DocumentView(id, request.knowledgeBaseId(), request.filename(), "INDEXING", Instant.now());
         store.documents.put(id, doc);
+        String contentHash = contentHash(request.content());
         Map<String, Object> payload = Map.of(
                 "document_id", id,
                 "knowledge_base_id", request.knowledgeBaseId(),
                 "filename", request.filename(),
                 "content", request.content(),
+                "content_hash", contentHash,
                 "allowed_user_ids", store.knowledgeBases.get(request.knowledgeBaseId()).allowedUserIds()
         );
+        AiIndexResponse indexResponse;
         try {
-            indexDocument(payload);
-            store.documents.put(id, new DocumentView(id, request.knowledgeBaseId(), request.filename(), "READY", doc.createdAt()));
+            indexResponse = indexDocument(payload);
+            String indexedDocumentId = indexResponse.document_id();
+            DocumentView indexedDoc = store.documents.get(indexedDocumentId);
+            if (indexedDoc == null) {
+                indexedDoc = new DocumentView(indexedDocumentId, request.knowledgeBaseId(), request.filename(), indexResponse.status(), doc.createdAt());
+            } else {
+                indexedDoc = new DocumentView(indexedDoc.id(), indexedDoc.knowledgeBaseId(), indexedDoc.filename(), indexResponse.status(), indexedDoc.createdAt());
+            }
+            store.documents.put(indexedDocumentId, indexedDoc);
+            if (!indexedDocumentId.equals(id)) {
+                store.documents.remove(id);
+            }
         } catch (Exception ex) {
             store.documents.put(id, new DocumentView(id, request.knowledgeBaseId(), request.filename(), "FAILED", doc.createdAt()));
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI indexing failed: " + rootMessage(ex), ex);
         }
-        try {
-            rabbitTemplate.convertAndSend(documentQueue, payload);
-        } catch (Exception ignored) {
-            // RabbitMQ is an async acceleration path for the demo; synchronous indexing above is authoritative.
+        if (!indexResponse.duplicate()) {
+            try {
+                rabbitTemplate.convertAndSend(documentQueue, payload);
+            } catch (Exception ignored) {
+                // RabbitMQ is an async acceleration path for the demo; synchronous indexing above is authoritative.
+            }
         }
-        return store.documents.get(id);
+        return store.documents.get(indexResponse.document_id());
     }
 
     @RabbitListener(queues = "${rag.rabbit.document-index-queue}")
@@ -316,8 +334,8 @@ class ApiController {
         }
     }
 
-    private void indexDocument(Map<String, Object> payload) {
-        postJson("ai/documents/index", payload, Void.class);
+    private AiIndexResponse indexDocument(Map<String, Object> payload) {
+        return postJson("ai/documents/index", payload, AiIndexResponse.class);
     }
 
     private <T> T postJson(String path, Map<String, Object> payload, Class<T> responseType) {
@@ -360,5 +378,15 @@ class ApiController {
             cursor = cursor.getCause();
         }
         return cursor.getMessage() == null ? ex.getClass().getSimpleName() : cursor.getMessage();
+    }
+
+    private String contentHash(String content) {
+        String normalized = content == null ? "" : content.replace("\r\n", "\n").replace("\r", "\n").strip();
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(normalized.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is not available", ex);
+        }
     }
 }

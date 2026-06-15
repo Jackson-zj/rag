@@ -11,5 +11,6 @@ __pycache__/
 .venv/
 *.pyc
 *.log
+deploy/.env
 .mvn/wrapper/apache-maven-*/
 .mvn/wrapper/*.zip

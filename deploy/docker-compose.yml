@@ -1,42 +1,52 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
+  pgvector:
+    image: ${PGVECTOR_IMAGE:-pgvector/pgvector:pg17}
+    container_name: pgvector
     environment:
-      POSTGRES_USER: rag
-      POSTGRES_PASSWORD: rag
-      POSTGRES_DB: rag
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: rag_db
     ports:
-      - "5432:5432"
+      - "${PGVECTOR_PORT:-5433}:5432"
     volumes:
+      - pgvector_data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: ${REDIS_IMAGE:-redis:7-alpine}
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
 
   rabbitmq:
-    image: rabbitmq:3-management
+    image: ${RABBITMQ_IMAGE:-rabbitmq:3-management}
     environment:
       RABBITMQ_DEFAULT_USER: rag
       RABBITMQ_DEFAULT_PASS: rag
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
 
   ai-service:
     build:
       context: ../ai-service
+      args:
+        DOCKERHUB_LIBRARY_PREFIX: ${DOCKERHUB_LIBRARY_PREFIX:-}
     environment:
-      MODEL_BASE_URL: ${MODEL_BASE_URL:-https://api.openai.com/v1}
+      VECTOR_DATABASE_URL: postgresql://postgres:123456@pgvector:5432/rag_db
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       MODEL_API_KEY: ${MODEL_API_KEY:-}
-      MODEL_NAME: ${MODEL_NAME:-gpt-4o-mini}
+      MODEL_NAME: ${MODEL_NAME:-qwen3.7-plus}
+    depends_on:
+      - pgvector
     ports:
-      - "8000:8000"
+      - "${AI_SERVICE_PORT:-8000}:8000"
 
   backend-java:
     build:
       context: ../backend-java
+      args:
+        DOCKERHUB_LIBRARY_PREFIX: ${DOCKERHUB_LIBRARY_PREFIX:-}
     environment:
       AI_SERVICE_URL: http://ai-service:8000
       RABBITMQ_HOST: rabbitmq
@@ -46,28 +56,32 @@ services:
       - ai-service
       - rabbitmq
     ports:
-      - "8080:8080"
+      - "${BACKEND_PORT:-8080}:8080"
 
   frontend:
     build:
       context: ../frontend
+      args:
+        DOCKERHUB_LIBRARY_PREFIX: ${DOCKERHUB_LIBRARY_PREFIX:-}
     depends_on:
       - backend-java
     ports:
-      - "5173:80"
+      - "${FRONTEND_PORT:-5173}:80"
 
   prometheus:
-    image: prom/prometheus:v2.55.0
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v2.55.0}
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT:-9090}:9090"
 
   grafana:
-    image: grafana/grafana:11.3.0
+    image: ${GRAFANA_IMAGE:-grafana/grafana:11.3.0}
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
     ports:
-      - "3000:3000"
+      - "${GRAFANA_PORT:-3000}:3000"
 
+volumes:
+  pgvector_data:

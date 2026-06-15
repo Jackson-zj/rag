@@ -99,11 +99,37 @@ cd D:\pythonWorkspace\RAG\frontend
 npm run dev
 ```
 
+Start all services with Docker Compose from WSL/Linux:
+
+```bash
+cd /mnt/d/pythonWorkspace/RAG
+cp deploy/.env.example deploy/.env
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up --build
+```
+
+Use foreground Compose startup while debugging so image pull, build, and service logs are visible. After startup is known-good, use detached mode:
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml logs -f
+```
+
+Stop Docker Compose services:
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml down
+```
+
+If Docker Hub is unreachable, edit `deploy/.env` and set `DOCKERHUB_LIBRARY_PREFIX`, `PGVECTOR_IMAGE`, `REDIS_IMAGE`, `RABBITMQ_IMAGE`, `PROMETHEUS_IMAGE`, and `GRAFANA_IMAGE` to a reachable registry mirror. If a host port is occupied, change the corresponding port variable, for example `BACKEND_PORT=18080` maps host port `18080` to container port `8080`.
+
 Expected local URLs:
 
 - Frontend: `http://localhost:5173`
 - Java backend: `http://localhost:8080`
 - AI service docs: `http://localhost:8000/docs`
+- RabbitMQ console: `http://localhost:15672`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
 
 ## Validation Commands
 

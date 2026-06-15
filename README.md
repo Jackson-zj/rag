@@ -53,9 +53,10 @@ cd backend-java
 
 ```powershell
 cd ai-service
-D:\anaconda3\envs\torch311\python.exe -m pip install -r requirements.txt
-D:\anaconda3\envs\torch311\python.exe -m unittest discover -s tests
-D:\anaconda3\envs\torch311\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+conda activate rag-ai
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 AI API 文档：`http://localhost:8000/docs`
@@ -73,10 +74,26 @@ npm run dev
 
 ## Docker Compose 启动
 
-如果本机已安装 Docker：
+如果在 WSL/Linux 终端中启动，并且当前目录是项目根目录 `/mnt/d/pythonWorkspace/RAG`：
 
-```powershell
-docker compose -f deploy/docker-compose.yml up --build
+```bash
+cp deploy/.env.example deploy/.env
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up --build
+```
+
+如果 Docker Hub 拉取镜像超时，编辑 `deploy/.env`，把 `DOCKERHUB_LIBRARY_PREFIX`、`PGVECTOR_IMAGE`、`REDIS_IMAGE`、`RABBITMQ_IMAGE`、`PROMETHEUS_IMAGE` 和 `GRAFANA_IMAGE` 改成当前网络可访问的镜像源。示例已写在 `deploy/.env.example` 中。
+
+`--build` 表示启动前重新构建 `frontend`、`backend-java` 和 `ai-service` 的本地镜像。排错时建议前台运行，能直接看到构建和启动日志；确认可用后可以后台启动：
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml logs -f
+```
+
+停止并清理本次 Compose 启动的容器：
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml down
 ```
 
 服务地址：
@@ -88,7 +105,7 @@ docker compose -f deploy/docker-compose.yml up --build
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`
 
-当前环境未检测到 `docker` 命令，因此本机未强制启动容器；已完成 `docker-compose.yml` 和 `prometheus.yml` 的 YAML 静态解析检查。
+如果宿主机端口被占用，可以修改 `deploy/.env` 中的端口变量，例如 `BACKEND_PORT=18080` 会把宿主机 `18080` 转发到容器内 `8080`。
 
 ## Demo 账号
 
@@ -100,7 +117,7 @@ docker compose -f deploy/docker-compose.yml up --build
 - `.\mvnw.cmd -version`: Maven 3.9.9 + Java 17 可用。
 - `.\mvnw.cmd test`: 后端聚合工程构建通过。
 - `.\mvnw.cmd package -DskipTests`: 后端 jar 打包通过。
-- `D:\anaconda3\envs\torch311\python.exe -m unittest discover -s ai-service\tests`: AI 服务 3 个测试通过。
+- `conda activate rag-ai; python -m unittest discover -s ai-service\tests`: AI 服务 3 个测试通过。
 - `npm run build`: 前端 TypeScript + Vite 构建通过。
 - Docker/Prometheus YAML 静态解析通过。
 

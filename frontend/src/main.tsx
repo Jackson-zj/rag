@@ -10,6 +10,7 @@ type ChatSession = { id: string; title: string; knowledgeBaseIds: string[] };
 type AuthContext = { token: string; user: User; kbs: KnowledgeBase[] };
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "";
+const pdfWorkerSrc = `${pdfWorkerUrl}?v=module-mime`;
 const defaultQuestion = "员工报销需要注意什么？";
 const defaultDocText = "员工报销需要在费用发生后30天内提交发票、付款凭证和审批单。差旅费用需关联出差申请。";
 
@@ -85,7 +86,7 @@ function sanitizeExtractedText(text: string): string {
 
 async function extractPdfText(file: File): Promise<string> {
   const pdfjsLib = await import("pdfjs-dist");
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
   const data = new Uint8Array(await file.arrayBuffer());
   const pdf = await pdfjsLib.getDocument({ data }).promise;
   const pages: string[] = [];
