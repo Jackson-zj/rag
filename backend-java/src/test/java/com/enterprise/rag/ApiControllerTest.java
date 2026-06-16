@@ -7,6 +7,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.sql.ResultSet;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -111,9 +112,81 @@ class ApiControllerTest {
         ));
 
         ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
-                controller.messages("Bearer user", "chat-other"));
+                controller.messages("Bearer user", "chat-other", null));
 
         assertEquals(403, ex.getStatusCode().value());
+    }
+
+    @Test
+    void messagesWithoutRoundsReturnsAllSessionMessages() {
+        CurrentUser user = new CurrentUser("u-user", "user", false, List.of("USER"), List.of("kb-hr"));
+        ChatSessionView session = new ChatSessionView("chat-1", "u-user", "chat", List.of("kb-hr"), Instant.now());
+        List<ChatMessageView> messages = List.of(
+                new ChatMessageView("msg-1", "chat-1", "user", "Q1", Instant.now()),
+                new ChatMessageView("msg-2", "chat-1", "assistant", "A1", Instant.now())
+        );
+        when(auth.currentUser("Bearer user")).thenReturn(user);
+        when(chats.getSession("chat-1")).thenReturn(Optional.of(session));
+        when(chats.messages("chat-1")).thenReturn(messages);
+
+        List<ChatMessageView> result = controller.messages("Bearer user", "chat-1", null);
+
+        assertEquals(messages, result);
+        verify(chats).messages("chat-1");
+        verify(chats, never()).messages(eq("chat-1"), any());
+    }
+
+    @Test
+    void messagesWithRoundsDelegatesToRoundLimitedRepositoryQuery() {
+        CurrentUser user = new CurrentUser("u-user", "user", false, List.of("USER"), List.of("kb-hr"));
+        ChatSessionView session = new ChatSessionView("chat-1", "u-user", "chat", List.of("kb-hr"), Instant.now());
+        List<ChatMessageView> messages = List.of(
+                new ChatMessageView("msg-21", "chat-1", "user", "Q11", Instant.now()),
+                new ChatMessageView("msg-22", "chat-1", "assistant", "A11", Instant.now())
+        );
+        when(auth.currentUser("Bearer user")).thenReturn(user);
+        when(chats.getSession("chat-1")).thenReturn(Optional.of(session));
+        when(chats.messages("chat-1", 10)).thenReturn(messages);
+
+        List<ChatMessageView> result = controller.messages("Bearer user", "chat-1", 10);
+
+        assertEquals(messages, result);
+        verify(chats).messages("chat-1", 10);
+        verify(chats, never()).messages("chat-1");
+    }
+
+    @Test
+    void repositoryLimitsMessagesToLatestRoundsInChronologicalOrder() throws Exception {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        ChatRepository repository = new ChatRepository(jdbc);
+        List<ChatMessageView> stored = new ArrayList<>();
+        Instant base = Instant.parse("2026-01-01T00:00:00Z");
+        for (int round = 1; round <= 12; round += 1) {
+            stored.add(new ChatMessageView("user-" + round, "chat-1", "user", "Q" + round, base.plusSeconds(round * 2L)));
+            stored.add(new ChatMessageView("assistant-" + round, "chat-1", "assistant", "A" + round, base.plusSeconds(round * 2L + 1)));
+        }
+        stubChatRows(jdbc, stored);
+
+        List<ChatMessageView> result = repository.messages("chat-1", 10);
+
+        assertEquals(20, result.size());
+        assertEquals("user-3", result.get(0).id());
+        assertEquals("assistant-12", result.get(result.size() - 1).id());
+    }
+
+    @Test
+    void repositoryReturnsAllMessagesWhenRoundsOmitted() throws Exception {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        ChatRepository repository = new ChatRepository(jdbc);
+        List<ChatMessageView> stored = List.of(
+                new ChatMessageView("user-1", "chat-1", "user", "Q1", Instant.parse("2026-01-01T00:00:00Z")),
+                new ChatMessageView("assistant-1", "chat-1", "assistant", "A1", Instant.parse("2026-01-01T00:00:01Z"))
+        );
+        stubChatRows(jdbc, stored);
+
+        List<ChatMessageView> result = repository.messages("chat-1");
+
+        assertEquals(stored, result);
     }
 
     @Test
@@ -140,5 +213,24 @@ class ApiControllerTest {
 
         assertEquals(1, visible.size());
         assertEquals("kb-hr", visible.get(0).id());
+    }
+
+    @SuppressWarnings("unchecked")
+    private void stubChatRows(JdbcTemplate jdbc, List<ChatMessageView> stored) {
+        when(jdbc.query(any(String.class), any(org.springframework.jdbc.core.RowMapper.class), eq("chat-1"))).thenAnswer(invocation -> {
+            org.springframework.jdbc.core.RowMapper<ChatMessageView> mapper = invocation.getArgument(1);
+            List<ChatMessageView> mapped = new ArrayList<>();
+            for (int index = 0; index < stored.size(); index += 1) {
+                ChatMessageView message = stored.get(index);
+                ResultSet row = mock(ResultSet.class);
+                when(row.getString("id")).thenReturn(message.id());
+                when(row.getString("session_id")).thenReturn(message.sessionId());
+                when(row.getString("role")).thenReturn(message.role());
+                when(row.getString("content")).thenReturn(message.content());
+                when(row.getTimestamp("created_at")).thenReturn(java.sql.Timestamp.from(message.createdAt()));
+                mapped.add(mapper.mapRow(row, index));
+            }
+            return mapped;
+        });
     }
 }

@@ -22,12 +22,15 @@ type User = { id: string; username: string; disabled: boolean; roles: string[]; 
 type Role = { id: string; name: string; description: string; systemRole: boolean; knowledgeBaseIds: string[] };
 type KnowledgeBase = { id: string; name: string; description: string };
 type ChatSession = { id: string; title: string; knowledgeBaseIds: string[] };
-type ChatTurn = { id: string; role: "user" | "assistant"; content: string };
+type ChatRole = "user" | "assistant" | "system";
+type ChatTurn = { id: string; role: ChatRole; content: string };
+type ChatMessage = ChatTurn & { sessionId: string; createdAt: string };
 type AuthMode = "login" | "register";
 type AdminPage = "upload" | "users" | "roles" | "chat";
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "";
 const pdfWorkerSrc = `${pdfWorkerUrl}?v=module-mime`;
+const historyRounds = 10;
 const defaultQuestion = "员工报销需要注意什么？";
 const defaultDocText = "员工报销需要在费用发生后 30 天内提交发票、付款凭证和审批单。差旅费用需要关联出差申请。";
 
@@ -64,6 +67,22 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
     .map((line) => line.replace(/^data:\s?/, ""))
     .join("\n");
   return { event, data };
+}
+
+function keepLatestRounds(messages: ChatTurn[], rounds = historyRounds): ChatTurn[] {
+  if (rounds <= 0) return messages;
+  let userTurnsSeen = 0;
+  let start = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role === "user") {
+      userTurnsSeen += 1;
+      if (userTurnsSeen === rounds) {
+        start = index;
+        break;
+      }
+    }
+  }
+  return userTurnsSeen < rounds ? messages : messages.slice(start);
 }
 
 function fileExtension(filename: string): string {
@@ -184,9 +203,16 @@ function App() {
 
   async function hydrate(authToken: string, current: User) {
     const visibleKbs = await request<KnowledgeBase[]>("/api/knowledge-bases", authToken);
+    const sessions = await request<ChatSession[]>("/api/chat/sessions", authToken);
+    const latestSession = sessions[0] ?? null;
+    const history = latestSession
+      ? await request<ChatMessage[]>(`/api/chat/sessions/${latestSession.id}/messages?rounds=${historyRounds}`, authToken)
+      : [];
     setToken(authToken);
     setUser(current);
     setKbs(visibleKbs);
+    setSession(latestSession);
+    setChatMessages(keepLatestRounds(history));
     if (current.roles.includes("ADMIN")) {
       const [adminUsers, adminRoles] = await Promise.all([
         request<User[]>("/api/admin/users", authToken),
@@ -369,7 +395,7 @@ function App() {
     setSuccess("");
     const userTurn: ChatTurn = { id: `user-${Date.now()}`, role: "user", content: prompt };
     const assistantId = `assistant-${Date.now()}`;
-    setChatMessages((old) => [...old, userTurn, { id: assistantId, role: "assistant", content: "" }]);
+    setChatMessages((old) => keepLatestRounds([...old, userTurn, { id: assistantId, role: "assistant", content: "" }]));
     setQuestion("");
     try {
       const activeSession = session ?? await createSession();

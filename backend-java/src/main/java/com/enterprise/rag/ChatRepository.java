@@ -54,6 +54,32 @@ class ChatRepository {
     }
 
     List<ChatMessageView> messages(String sessionId) {
+        return allMessages(sessionId);
+    }
+
+    List<ChatMessageView> messages(String sessionId, Integer rounds) {
+        List<ChatMessageView> all = allMessages(sessionId);
+        if (rounds == null || rounds <= 0) {
+            return all;
+        }
+        int userTurnsSeen = 0;
+        int start = 0;
+        for (int i = all.size() - 1; i >= 0; i -= 1) {
+            if ("user".equals(all.get(i).role())) {
+                userTurnsSeen += 1;
+                if (userTurnsSeen == rounds) {
+                    start = i;
+                    break;
+                }
+            }
+        }
+        if (userTurnsSeen < rounds) {
+            return all;
+        }
+        return all.subList(start, all.size());
+    }
+
+    private List<ChatMessageView> allMessages(String sessionId) {
         return jdbc.query("""
                 SELECT id, session_id, role, content, created_at
                 FROM chat_messages

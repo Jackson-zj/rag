@@ -214,10 +214,12 @@ class ApiController {
     }
 
     @GetMapping("/chat/sessions/{id}/messages")
-    List<ChatMessageView> messages(@RequestHeader("Authorization") String authorizationHeader, @PathVariable("id") String id) {
+    List<ChatMessageView> messages(@RequestHeader("Authorization") String authorizationHeader,
+                                   @PathVariable("id") String id,
+                                   @RequestParam(value = "rounds", required = false) Integer rounds) {
         CurrentUser user = auth.currentUser(authorizationHeader);
         ChatSessionView session = requireOwnSession(user, id);
-        return chats.messages(session.id());
+        return rounds == null ? chats.messages(session.id()) : chats.messages(session.id(), rounds);
     }
 
     @PostMapping(value = "/chat/sessions/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
