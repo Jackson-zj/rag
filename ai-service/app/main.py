@@ -286,12 +286,17 @@ def index_document_in_postgres(request: IndexRequest) -> dict[str, Any]:
             )
             existing = cursor.fetchone()
             if existing is not None:
-                return {
-                    "document_id": existing["id"],
-                    "status": existing["status"],
-                    "chunk_count": existing["chunk_count"],
-                    "duplicate": True,
-                }
+                cursor.execute("SELECT count(*) AS chunk_total FROM document_chunks WHERE document_id = %s", (existing["id"],))
+                chunk_total = int(cursor.fetchone()["chunk_total"])
+                if int(existing["chunk_count"]) > 0 and chunk_total > 0:
+                    return {
+                        "document_id": existing["id"],
+                        "status": existing["status"],
+                        "chunk_count": existing["chunk_count"],
+                        "duplicate": True,
+                    }
+                cursor.execute("DELETE FROM document_chunks WHERE document_id = %s", (existing["id"],))
+                cursor.execute("DELETE FROM documents WHERE id = %s", (existing["id"],))
 
             chunks = split_text(request.content)
             try:
@@ -347,6 +352,7 @@ def index_document_in_postgres(request: IndexRequest) -> dict[str, Any]:
 def search_chunks_in_memory(request: SearchRequest, query_vector: list[float]) -> list[dict[str, Any]]:
     visible = []
     for chunk in CHUNKS:
+        # KB scope is the primary permission boundary; allowed_user_ids is legacy ACL compatibility.
         if chunk["knowledge_base_id"] not in request.knowledge_base_ids:
             continue
         if chunk["allowed_user_ids"] and request.user_id not in chunk["allowed_user_ids"]:
@@ -378,6 +384,7 @@ def search_chunks_in_postgres(request: SearchRequest, query_vector: list[float])
                     1 - (embedding <=> %s::vector) AS vector_score
                 FROM document_chunks
                 WHERE knowledge_base_id = ANY(%s)
+                  -- Empty allowed_user_ids means no extra legacy user ACL beyond the KB scope.
                   AND (cardinality(allowed_user_ids) = 0 OR %s = ANY(allowed_user_ids))
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s

@@ -44,15 +44,20 @@ services:
 
   backend-java:
     build:
-      context: ../backend-java
+      context: ..
+      dockerfile: backend-java/Dockerfile
       args:
         DOCKERHUB_LIBRARY_PREFIX: ${DOCKERHUB_LIBRARY_PREFIX:-}
     environment:
       AI_SERVICE_URL: http://ai-service:8000
+      DATABASE_URL: jdbc:postgresql://pgvector:5432/rag_db
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: 123456
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: rag
       RABBITMQ_PASSWORD: rag
     depends_on:
+      - pgvector
       - ai-service
       - rabbitmq
     ports:

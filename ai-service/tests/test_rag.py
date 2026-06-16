@@ -51,6 +51,20 @@ class FakePostgresCursor:
             }
             self.result = None
             return
+        if compact.startswith("SELECT count(*) AS chunk_total FROM document_chunks"):
+            (document_id,) = params
+            self.result = {"chunk_total": sum(1 for chunk in self.database.chunks if chunk["document_id"] == document_id)}
+            return
+        if compact.startswith("DELETE FROM document_chunks"):
+            (document_id,) = params
+            self.database.chunks = [chunk for chunk in self.database.chunks if chunk["document_id"] != document_id]
+            self.result = None
+            return
+        if compact.startswith("DELETE FROM documents"):
+            (document_id,) = params
+            self.database.documents.pop(document_id, None)
+            self.result = None
+            return
         if compact.startswith("INSERT INTO document_chunks"):
             chunk_id, document_id, kb_id, filename, position, content, embedding, allowed_user_ids = params
             self.database.chunks.append(
@@ -146,6 +160,45 @@ class RagServiceTest(unittest.TestCase):
 
         self.assertEqual([], denied["results"])
         self.assertEqual(1, len(allowed["results"]))
+
+    def test_memory_search_treats_empty_legacy_acl_as_kb_scoped(self):
+        index_document(
+            IndexRequest(
+                document_id="doc-kb-scope",
+                knowledge_base_id="kb-hr",
+                filename="policy.txt",
+                content="Travel reimbursement requires manager approval.",
+                allowed_user_ids=[],
+            )
+        )
+
+        allowed = rag_search(SearchRequest(user_id="u-analyst", query="travel reimbursement", knowledge_base_ids=["kb-hr"]))
+        denied_by_kb_scope = rag_search(SearchRequest(user_id="u-analyst", query="travel reimbursement", knowledge_base_ids=["kb-tech"]))
+
+        self.assertEqual(1, len(allowed["results"]))
+        self.assertEqual("kb-hr", allowed["results"][0]["knowledge_base_id"])
+        self.assertEqual([], denied_by_kb_scope["results"])
+
+    def test_postgres_search_treats_empty_legacy_acl_as_kb_scoped(self):
+        database = FakePostgresDatabase()
+
+        with patch.object(main, "VECTOR_DATABASE_URL", "postgresql://test"), patch.object(main, "postgres_connection", database.connection):
+            index_document(
+                IndexRequest(
+                    document_id="doc-pg-kb-scope",
+                    knowledge_base_id="kb-hr",
+                    filename="policy.txt",
+                    content="Travel reimbursement requires manager approval.",
+                    content_hash="pg-kb-scope",
+                    allowed_user_ids=[],
+                )
+            )
+            allowed = rag_search(SearchRequest(user_id="u-analyst", query="travel reimbursement", knowledge_base_ids=["kb-hr"]))
+            denied_by_kb_scope = rag_search(SearchRequest(user_id="u-analyst", query="travel reimbursement", knowledge_base_ids=["kb-tech"]))
+
+        self.assertEqual(1, len(allowed["results"]))
+        self.assertEqual("doc-pg-kb-scope", allowed["results"][0]["document_id"])
+        self.assertEqual([], denied_by_kb_scope["results"])
 
     def test_pgvector_dedupes_same_hash_within_knowledge_base(self):
         database = FakePostgresDatabase()

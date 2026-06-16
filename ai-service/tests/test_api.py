@@ -55,6 +55,41 @@ class AiApiTest(unittest.TestCase):
         self.assertIn("tool_calls", body)
         self.assertEqual("rag_search", body["tool_calls"][0]["name"])
 
+    def test_search_uses_knowledge_base_scope_when_legacy_acl_is_empty(self):
+        self.client.post(
+            "/ai/documents/index",
+            json={
+                "document_id": "doc-api-kb-contract",
+                "knowledge_base_id": "kb-hr",
+                "filename": "hr-contract.txt",
+                "content": "The travel reimbursement policy requires manager approval.",
+                "allowed_user_ids": [],
+            },
+        )
+
+        allowed = self.client.post(
+            "/ai/rag/search",
+            json={
+                "user_id": "u-new-role-member",
+                "query": "travel reimbursement manager approval",
+                "knowledge_base_ids": ["kb-hr"],
+            },
+        )
+        denied_by_kb_scope = self.client.post(
+            "/ai/rag/search",
+            json={
+                "user_id": "u-new-role-member",
+                "query": "travel reimbursement manager approval",
+                "knowledge_base_ids": ["kb-tech"],
+            },
+        )
+
+        self.assertEqual(200, allowed.status_code)
+        self.assertEqual(1, len(allowed.json()["results"]))
+        self.assertEqual("kb-hr", allowed.json()["results"][0]["knowledge_base_id"])
+        self.assertEqual(200, denied_by_kb_scope.status_code)
+        self.assertEqual([], denied_by_kb_scope.json()["results"])
+
     def test_index_is_idempotent_for_same_document(self):
         payload = {
             "document_id": "doc-repeat",

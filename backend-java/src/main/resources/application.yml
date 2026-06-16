@@ -6,6 +6,10 @@ server:
 spring:
   application:
     name: enterprise-rag-backend
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5433/rag_db}
+    username: ${DATABASE_USER:postgres}
+    password: ${DATABASE_PASSWORD:123456}
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
