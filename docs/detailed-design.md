@@ -333,6 +333,8 @@ record AiIndexResponse(String document_id, String status, int chunk_count, boole
 
 - `GET /api/chat/sessions/{id}/messages`
   - 只能访问自己的会话。
+  - 可选查询参数 `rounds`，例如 `rounds=10`。
+  - 传入 `rounds` 时返回该会话最新 N 轮用户问题及其后续助手消息，并按时间正序返回。
 
 - `POST /api/chat/sessions/{id}/stream`
   - 只能访问自己的会话。

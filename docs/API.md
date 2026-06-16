@@ -33,7 +33,8 @@ Admin-only APIs:
 
 - `POST /api/chat/sessions`: creates a chat session. If `knowledgeBaseIds` is omitted, the backend uses all knowledge bases visible to the current user.
 - `GET /api/chat/sessions`: lists the current user's chat sessions.
-- `GET /api/chat/sessions/{id}/messages`: lists messages for the current user's session. Optional `rounds` limits the response to the latest N user question rounds and their following messages.
+- `GET /api/chat/sessions/{id}/messages`: lists messages for the current user's session.
+- `GET /api/chat/sessions/{id}/messages?rounds=10`: lists the latest 10 user question rounds and their following assistant messages for the current user's session, returned in chronological order.
 - `POST /api/chat/sessions/{id}/stream`: streams assistant tokens and tool events, and persists user/assistant messages.
 
 ## AI API

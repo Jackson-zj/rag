@@ -107,6 +107,13 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml down
 
 如果宿主机端口被占用，可以修改 `deploy/.env` 中的端口变量，例如 `BACKEND_PORT=18080` 会把宿主机 `18080` 转发到容器内 `8080`。
 
+## 聊天历史
+
+- 聊天会话和消息按用户存储在 PostgreSQL 中，用户只能读取自己的会话历史。
+- 登录成功后，前端会自动加载当前用户最近创建的会话，并展示该会话最新 10 轮问答。
+- 如果用户没有历史会话，聊天窗口保持空状态；首次提问时仍会自动创建新会话。
+- 可通过 `GET /api/chat/sessions/{id}/messages?rounds=10` 获取指定会话最近 10 轮问答，结果按时间正序返回。
+
 ## Demo 账号
 
 - `admin / admin123`: 可访问 HR 和技术架构知识库。

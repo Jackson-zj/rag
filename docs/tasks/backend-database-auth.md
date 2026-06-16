@@ -6,9 +6,9 @@
 
 ## 输入文档
 
-- `doc/proposal.md`
-- `doc/high-level-design.md`
-- `doc/detailed-design.md`
+- `docs/proposal.md`
+- `docs/high-level-design.md`
+- `docs/detailed-design.md`
 
 ## 预期修改文件
 
@@ -33,7 +33,7 @@
 - [ ] 新建或整理 `Models.java`，放置注册、登录、用户视图、角色视图等 record。
 - [ ] 实现 `UserRepository`，支持用户查询、创建、角色查询和默认角色分配。
 - [ ] 实现 `AuthService`，支持注册、登录、BCrypt 校验、token 生成、当前用户解析和禁用状态校验。
-- [ ] 保留 `admin / admin123` 与 `analyst / analyst123` 的本地 demo 初始化能力。
+- [ ] 保留 `admin / admin123` 和 `analyst / analyst123` 的本地 demo 初始化能力。
 - [ ] 更新或新增测试覆盖注册、登录、重复用户名、禁用用户登录失败。
 
 ## 测试与检查

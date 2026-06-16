@@ -6,11 +6,11 @@
 
 ## 输入文档
 
-- `doc/proposal.md`
-- `doc/high-level-design.md`
-- `doc/detailed-design.md`
-- `doc/tasks/backend-database-auth.md`
-- `doc/tasks/backend-admin-rbac.md`
+- `docs/proposal.md`
+- `docs/high-level-design.md`
+- `docs/detailed-design.md`
+- `docs/tasks/backend-database-auth.md`
+- `docs/tasks/backend-admin-rbac.md`
 
 ## 预期修改文件
 
@@ -38,7 +38,7 @@
 - [ ] 上传文档时向 AI 服务传 `allowed_user_ids: []`。
 - [ ] 创建聊天会话时，如果请求未传知识库 ID，则使用当前用户全部可访问知识库。
 - [ ] 聊天 SSE 流保存用户消息和助手消息。
-- [ ] Docker Compose 为 Java 后端补充数据库连接环境变量。
+- [ ] Docker Compose 中 Java 后端补充数据库连接环境变量。
 - [ ] 添加测试覆盖普通用户上传被拒绝、聊天会话范围自动计算、用户不能访问他人会话。
 
 ## 测试与检查
