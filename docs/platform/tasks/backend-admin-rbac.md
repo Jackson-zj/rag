@@ -6,10 +6,10 @@
 
 ## 输入文档
 
-- `docs/proposal.md`
-- `docs/high-level-design.md`
-- `docs/detailed-design.md`
-- `docs/tasks/backend-database-auth.md`
+- `docs/platform/proposal.md`
+- `docs/platform/high-level-design.md`
+- `docs/platform/detailed-design.md`
+- `docs/platform/tasks/backend-database-auth.md`
 
 ## 预期修改文件
 

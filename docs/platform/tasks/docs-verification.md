@@ -6,17 +6,17 @@
 
 ## 输入文档
 
-- `docs/proposal.md`
-- `docs/high-level-design.md`
-- `docs/detailed-design.md`
-- `docs/tasks/*.md`
+- `docs/platform/proposal.md`
+- `docs/platform/high-level-design.md`
+- `docs/platform/detailed-design.md`
+- `docs/platform/tasks/*.md`
 
 ## 预期修改文件
 
 - `docs/API.md`
 - `docs/ARCHITECTURE.md`
 - `README.md` 或 `AGENTS.md`，仅在需要同步运行方式时修改
-- `docs/tasks/progress.md`
+- `docs/platform/tasks/progress.md`
 
 ## 依赖
 
@@ -32,7 +32,7 @@
 - [ ] 执行前端构建。
 - [ ] 视条件执行本地服务烟测：管理员登录上传、普通用户聊天、权限移除后不可见。
 - [ ] 检查 `git diff`，确认无无关改动、无密钥、无生成物误提交。
-- [ ] 更新 `docs/tasks/progress.md` 最终状态。
+- [ ] 更新 `docs/platform/tasks/progress.md` 最终状态。
 
 ## 测试与检查
 

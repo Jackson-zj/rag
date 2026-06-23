@@ -90,6 +90,8 @@ class AiClient {
         }
         switch (event) {
             case "tool" -> emitter.send(SseEmitter.event().name("tool").data(data));
+            case "tool_result" -> emitter.send(SseEmitter.event().name("tool_result").data(data));
+            case "citation" -> emitter.send(SseEmitter.event().name("citation").data(data));
             case "token" -> {
                 answer.append(data);
                 emitter.send(SseEmitter.event().name("token").data(data));

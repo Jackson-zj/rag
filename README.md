@@ -27,6 +27,15 @@ flowchart LR
 - `deploy`: Docker Compose、PostgreSQL/pgvector 初始化 SQL、Prometheus 配置和 Grafana 服务。
 - `docs`: API、架构说明和简历描述。
 
+## Agent MVP
+
+- FastAPI 使用 LangGraph 编排 Agent，并根据问题意图路由到 `rag`、`sql`、`mixed` 或 `direct` 处理流程。
+- `rag_search` Tool 封装原有的向量检索能力，继续执行知识库授权范围和用户权限过滤。
+- `sql_query` Tool 采用混合 Text2SQL 流程：检索业务语义域，先提取并锁定日期、用户名和枚举条件，再由模型或规则生成 QueryPlan，完成合并校验、权限策略注入、参数化 SQL 编译与执行，最后由大模型归纳查询结果。
+- 大模型不直接生成可执行 SQL。六个业务域统一声明在 `semantic-registry.json` 中，数据库仅执行校验通过的单条 `SELECT`，且最多返回 50 行。
+- 考勤和员工工作日志通过安全数据库视图查询。管理员可以查询全部员工，普通用户只能查询与自身数据库用户 ID 关联的数据。
+- SSE 流支持 `tool`、`tool_result`、`citation`、`token`、`error` 和 `done` 事件；只有最终回答的 `token` 内容会作为助手消息持久化。
+
 ## 本地开发启动
 
 ### 1. 后端 Java
@@ -110,21 +119,23 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml down
 ## 聊天历史
 
 - 聊天会话和消息按用户存储在 PostgreSQL 中，用户只能读取自己的会话历史。
-- 登录成功后，前端会自动加载当前用户最近创建的会话，并展示该会话最新 10 轮问答。
-- 如果用户没有历史会话，聊天窗口保持空状态；首次提问时仍会自动创建新会话。
+- 前端提供历史会话列表、切换、新建和手工重命名；桌面端固定显示，移动端可展开或收起。
+- 登录或刷新后优先恢复当前用户上次选择的会话，并展示该会话最新 10 轮问答；会话不可用时回退到最新会话。
+- 新对话在首次提问时创建，并使用首个问题的前 32 个字符作为默认标题，不产生空会话。
 - 可通过 `GET /api/chat/sessions/{id}/messages?rounds=10` 获取指定会话最近 10 轮问答，结果按时间正序返回。
 
 ## Demo 账号
 
 - `admin / admin123`: 可访问 HR 和技术架构知识库。
 - `analyst / analyst123`: 仅可访问 HR 知识库。
+- `user1` 至 `user5` / `user123`: 普通员工演示账号，每个账号初始化 4 条考勤和 4 条每日工作日志。
 
 ## 已验证
 
 - `.\mvnw.cmd -version`: Maven 3.9.9 + Java 17 可用。
 - `.\mvnw.cmd test`: 后端聚合工程构建通过。
 - `.\mvnw.cmd package -DskipTests`: 后端 jar 打包通过。
-- `conda activate rag-ai; python -m unittest discover -s ai-service\tests`: AI 服务 3 个测试通过。
+- `conda activate rag-ai; python -m unittest discover -s ai-service\tests`: AI 服务 40 个测试通过。
 - `npm run build`: 前端 TypeScript + Vite 构建通过。
 - Docker/Prometheus YAML 静态解析通过。
 

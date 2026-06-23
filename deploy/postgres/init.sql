@@ -79,6 +79,32 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS attendance_records (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attendance_date DATE NOT NULL,
+  clock_in TIME,
+  clock_out TIME,
+  status TEXT NOT NULL CHECK (status IN ('NORMAL', 'LATE', 'EARLY_LEAVE', 'ABSENT', 'LEAVE')),
+  work_minutes INT NOT NULL DEFAULT 0 CHECK (work_minutes >= 0),
+  overtime_minutes INT NOT NULL DEFAULT 0 CHECK (overtime_minutes >= 0),
+  remark TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, attendance_date)
+);
+
+CREATE TABLE IF NOT EXISTS employee_work_logs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  log_date DATE NOT NULL,
+  project_name TEXT NOT NULL,
+  work_summary TEXT NOT NULL,
+  work_hours NUMERIC(4, 1) NOT NULL CHECK (work_hours >= 0 AND work_hours <= 24),
+  completion_status TEXT NOT NULL CHECK (completion_status IN ('COMPLETED', 'IN_PROGRESS', 'BLOCKED')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, log_date)
+);
+
 ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
@@ -97,3 +123,55 @@ CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles (role_id);
 CREATE INDEX IF NOT EXISTS idx_role_kbs_kb ON role_knowledge_bases (knowledge_base_id);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages (session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_attendance_user_date ON attendance_records (user_id, attendance_date DESC);
+CREATE INDEX IF NOT EXISTS idx_work_logs_user_date ON employee_work_logs (user_id, log_date DESC);
+
+CREATE OR REPLACE VIEW agent_attendance_records AS
+SELECT
+  attendance.id,
+  attendance.user_id,
+  users.username,
+  attendance.attendance_date,
+  attendance.clock_in,
+  attendance.clock_out,
+  attendance.status,
+  attendance.work_minutes,
+  attendance.overtime_minutes,
+  attendance.remark
+FROM attendance_records attendance
+JOIN users ON users.id = attendance.user_id;
+
+CREATE OR REPLACE VIEW agent_employee_work_logs AS
+SELECT
+  logs.id,
+  logs.user_id,
+  users.username,
+  logs.log_date,
+  logs.project_name,
+  logs.work_summary,
+  logs.work_hours,
+  logs.completion_status
+FROM employee_work_logs logs
+JOIN users ON users.id = logs.user_id;
+
+CREATE OR REPLACE VIEW agent_chat_sessions AS
+SELECT
+  sessions.id,
+  sessions.user_id,
+  users.username,
+  sessions.title,
+  sessions.created_at
+FROM chat_sessions sessions
+JOIN users ON users.id = sessions.user_id;
+
+CREATE OR REPLACE VIEW agent_chat_messages AS
+SELECT
+  messages.id,
+  messages.session_id,
+  sessions.user_id,
+  users.username,
+  messages.role,
+  messages.created_at
+FROM chat_messages messages
+JOIN chat_sessions sessions ON sessions.id = messages.session_id
+JOIN users ON users.id = sessions.user_id;

@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "domains": {
+    "attendance": {
+      "source": "agent_attendance_records",
+      "description": "Employee attendance, clocking, lateness, absence, leave and overtime records.",
+      "aliases": ["attendance", "clock in", "clock out", "考勤", "打卡", "出勤", "迟到", "早退", "缺勤", "请假", "加班", "缺卡", "未打卡", "漏打卡", "忘记打卡"],
+      "policy": "employee_scope",
+      "date_field": "attendance_date",
+      "scope_field": "user_id",
+      "default_dimensions": ["username", "attendance_date", "status", "overtime_minutes", "remark"],
+      "default_order": [{"field": "attendance_date", "direction": "desc"}],
+      "dimensions": {
+        "user_id": {"type": "string", "description": "Internal employee identifier", "aliases": [], "internal": true},
+        "username": {"type": "string", "description": "Employee username", "aliases": ["员工", "人员", "用户", "姓名"]},
+        "attendance_date": {"type": "date", "description": "Attendance date", "aliases": ["日期", "哪天", "时间"]},
+        "clock_in": {"type": "time", "description": "Clock-in time", "aliases": ["上班打卡", "签到"]},
+        "clock_out": {"type": "time", "description": "Clock-out time", "aliases": ["下班打卡", "签退"]},
+        "status": {
+          "type": "enum",
+          "description": "Attendance status",
+          "aliases": ["考勤状态", "异常类型"],
+          "value_aliases": {
+            "正常": "NORMAL",
+            "正常出勤": "NORMAL",
+            "迟到": "LATE",
+            "早退": "EARLY_LEAVE",
+            "缺勤": "ABSENT",
+            "缺卡": "ABSENT",
+            "未打卡": "ABSENT",
+            "漏打卡": "ABSENT",
+            "忘记打卡": "ABSENT",
+            "请假": "LEAVE",
+            "异常": ["LATE", "EARLY_LEAVE", "ABSENT"]
+          }
+        },
+        "work_minutes": {"type": "integer", "description": "Worked minutes", "aliases": ["工作分钟", "工作时长"]},
+        "overtime_minutes": {"type": "integer", "description": "Overtime minutes", "aliases": ["加班分钟", "加班时长"]},
+        "remark": {"type": "string", "description": "Attendance note", "aliases": ["备注", "说明"]}
+      },
+      "metrics": {
+        "record_count": {"aggregate": "count", "field": "*", "description": "Attendance record count", "aliases": ["多少条", "记录数", "次数"]},
+        "employee_count": {"aggregate": "count_distinct", "field": "username", "description": "Distinct employee count", "aliases": ["多少人", "人数", "人员数"]},
+        "total_work_minutes": {"aggregate": "sum", "field": "work_minutes", "description": "Total worked minutes", "aliases": ["总工时", "累计工时"]},
+        "total_overtime_minutes": {"aggregate": "sum", "field": "overtime_minutes", "description": "Total overtime minutes", "aliases": ["总加班", "累计加班", "加班总时长"]}
+      }
+    },
+    "employee_worklog": {
+      "source": "agent_employee_work_logs",
+      "description": "Employee daily work logs, projects, hours and completion status.",
+      "aliases": ["work log", "daily log", "timesheet", "工作日志", "员工日志", "日报", "项目", "工时", "工作内容", "完成情况"],
+      "policy": "employee_scope",
+      "date_field": "log_date",
+      "scope_field": "user_id",
+      "default_dimensions": ["username", "log_date", "project_name", "work_summary", "work_hours", "completion_status"],
+      "default_order": [{"field": "log_date", "direction": "desc"}],
+      "dimensions": {
+        "user_id": {"type": "string", "description": "Internal employee identifier", "aliases": [], "internal": true},
+        "username": {"type": "string", "description": "Employee username", "aliases": ["员工", "人员", "用户"]},
+        "log_date": {"type": "date", "description": "Log date", "aliases": ["日期", "哪天"]},
+        "project_name": {"type": "string", "description": "Project name", "aliases": ["项目", "项目名称"]},
+        "work_summary": {"type": "string", "description": "Work summary", "aliases": ["工作内容", "日志内容", "总结"]},
+        "work_hours": {"type": "number", "description": "Worked hours", "aliases": ["工时", "工作时长"]},
+        "completion_status": {
+          "type": "enum",
+          "description": "Completion status",
+          "aliases": ["完成状态", "进度"],
+          "value_aliases": {"已完成": "COMPLETED", "完成": "COMPLETED", "进行中": "IN_PROGRESS", "阻塞": "BLOCKED", "受阻": "BLOCKED"}
+        }
+      },
+      "metrics": {
+        "record_count": {"aggregate": "count", "field": "*", "description": "Work-log count", "aliases": ["日志数", "多少条"]},
+        "employee_count": {"aggregate": "count_distinct", "field": "username", "description": "Distinct employee count", "aliases": ["人数", "多少人"]},
+        "total_work_hours": {"aggregate": "sum", "field": "work_hours", "description": "Total work hours", "aliases": ["总工时", "累计工时"]}
+      }
+    },
+    "knowledge_base": {
+      "source": "knowledge_bases",
+      "description": "Knowledge-base metadata visible to the current user.",
+      "aliases": ["knowledge base", "knowledge bases", "知识库"],
+      "policy": "knowledge_base_scope",
+      "scope_field": "id",
+      "default_dimensions": ["id", "name", "description", "created_at"],
+      "default_order": [{"field": "name", "direction": "asc"}],
+      "dimensions": {
+        "id": {"type": "string", "description": "Knowledge-base identifier", "aliases": ["知识库ID"]},
+        "name": {"type": "string", "description": "Knowledge-base name", "aliases": ["名称", "名字"]},
+        "description": {"type": "string", "description": "Knowledge-base description", "aliases": ["描述"]},
+        "created_at": {"type": "datetime", "description": "Creation time", "aliases": ["创建时间"]}
+      },
+      "metrics": {
+        "record_count": {"aggregate": "count", "field": "*", "description": "Knowledge-base count", "aliases": ["多少个", "总数", "数量"]}
+      }
+    },
+    "document": {
+      "source": "documents",
+      "description": "Indexed document metadata, status and chunk count.",
+      "aliases": ["document", "documents", "uploaded", "文档", "文件", "上传", "切片", "索引状态"],
+      "policy": "knowledge_base_scope",
+      "scope_field": "knowledge_base_id",
+      "date_field": "created_at",
+      "default_dimensions": ["knowledge_base_id", "filename", "status", "chunk_count", "created_at"],
+      "default_order": [{"field": "created_at", "direction": "desc"}],
+      "dimensions": {
+        "knowledge_base_id": {"type": "string", "description": "Knowledge-base identifier", "aliases": ["知识库"]},
+        "filename": {"type": "string", "description": "File name", "aliases": ["文件名", "文档名"]},
+        "status": {
+          "type": "enum",
+          "description": "Index status",
+          "aliases": ["状态", "文档状态"],
+          "value_aliases": {"已完成": "READY", "就绪": "READY", "处理中": "INDEXING", "失败": "FAILED"}
+        },
+        "chunk_count": {"type": "integer", "description": "Chunk count", "aliases": ["切片数", "分片数"]},
+        "created_at": {"type": "datetime", "description": "Upload time", "aliases": ["上传时间", "创建时间", "最近上传"]}
+      },
+      "metrics": {
+        "record_count": {"aggregate": "count", "field": "*", "description": "Document count", "aliases": ["文档数", "文件数", "多少文档"]},
+        "total_chunks": {"aggregate": "sum", "field": "chunk_count", "description": "Total chunk count", "aliases": ["总切片", "多少切片", "切片总数"]}
+      }
+    },
+    "chat_session": {
+      "source": "agent_chat_sessions",
+      "description": "Chat-session metadata without message content.",
+      "aliases": ["session", "sessions", "会话", "聊天会话"],
+      "policy": "session_scope",
+      "scope_field": "user_id",
+      "date_field": "created_at",
+      "default_dimensions": ["title", "username", "created_at"],
+      "default_order": [{"field": "created_at", "direction": "desc"}],
+      "dimensions": {
+        "user_id": {"type": "string", "description": "Session owner identifier", "aliases": [], "internal": true},
+        "username": {"type": "string", "description": "Session owner username", "aliases": ["用户", "人员"]},
+        "title": {"type": "string", "description": "Session title", "aliases": ["标题"]},
+        "created_at": {"type": "datetime", "description": "Session creation time", "aliases": ["创建时间", "最近"]}
+      },
+      "metrics": {
+        "record_count": {"aggregate": "count", "field": "*", "description": "Session count", "aliases": ["会话数", "多少会话"]},
+        "user_count": {"aggregate": "count_distinct", "field": "user_id", "description": "Distinct session-owner count", "aliases": ["用户数"]}
+      }
+    },
+    "chat_message": {
+      "source": "agent_chat_messages",
+      "description": "Chat-message metadata and role counts without message content.",
+      "aliases": ["message", "messages", "conversation", "chat", "消息", "对话", "聊天", "轮次", "问答轮数"],
+      "policy": "session_scope",
+      "scope_field": "user_id",
+      "date_field": "created_at",
+      "default_dimensions": ["role", "created_at"],
+      "default_order": [{"field": "created_at", "direction": "desc"}],
+      "dimensions": {
+        "user_id": {"type": "string", "description": "Session owner identifier", "aliases": [], "internal": true},
+        "username": {"type": "string", "description": "Session owner username", "aliases": ["用户"]},
+        "session_id": {"type": "string", "description": "Session identifier", "aliases": ["会话ID"]},
+        "role": {
+          "type": "enum",
+          "description": "Message role",
+          "aliases": ["消息角色"],
+          "value_aliases": {"用户消息": "user", "助手消息": "assistant", "系统消息": "system"}
+        },
+        "created_at": {"type": "datetime", "description": "Message creation time", "aliases": ["时间", "最近"]}
+      },
+      "metrics": {
+        "record_count": {"aggregate": "count", "field": "*", "description": "Message count", "aliases": ["消息数", "多少消息", "轮数", "多少轮"]}
+      }
+    }
+  }
+}

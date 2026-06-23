@@ -4,19 +4,16 @@ import json
 import math
 import os
 import re
-from typing import Any, TypedDict
+from typing import Any
 
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from prometheus_fastapi_instrumentator import Instrumentator
-from pydantic import BaseModel, Field
-
-try:
-    from langgraph.graph import END, StateGraph
-except Exception:
-    END = None
-    StateGraph = None
+from .agent import build_agent_response as build_agent_response_from_state
+from .agent import route_intent, run_agent_graph as run_agent_graph_impl
+from .agent import stream_agent_events, validate_sql
+from .schemas import AgentResponse, AgentState, ChatRequest, IndexRequest, ParseRequest, SearchRequest
 
 try:
     import psycopg
@@ -36,48 +33,6 @@ MODEL_NAME = os.getenv("MODEL_NAME", "qwen3.7-plus")
 
 CHUNKS: list[dict[str, Any]] = []
 MEMORY: dict[str, list[dict[str, str]]] = {}
-
-
-class ParseRequest(BaseModel):
-    filename: str
-    content: str
-
-
-class IndexRequest(BaseModel):
-    document_id: str
-    knowledge_base_id: str
-    filename: str
-    content: str
-    content_hash: str | None = None
-    allowed_user_ids: list[str] = Field(default_factory=list)
-
-
-class SearchRequest(BaseModel):
-    user_id: str
-    query: str
-    knowledge_base_ids: list[str]
-    top_k: int = 5
-
-
-class ChatRequest(BaseModel):
-    user_id: str
-    session_id: str
-    question: str
-    knowledge_base_ids: list[str]
-
-
-class AgentResponse(BaseModel):
-    answer: str
-    citations: list[dict[str, Any]] = Field(default_factory=list)
-    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class AgentState(TypedDict, total=False):
-    question: str
-    history: list[dict[str, str]]
-    tool_calls: list[dict[str, Any]]
-    search: dict[str, Any]
-    answer: str
 
 
 def readable_ratio(text: str) -> float:
@@ -780,65 +735,11 @@ async def stream_model_tokens(question: str, contexts: list[dict[str, Any]], his
 
 
 async def run_agent_graph(request: ChatRequest) -> dict[str, Any]:
-    history = MEMORY.setdefault(request.session_id, [])
-
-    async def memory_node(state: AgentState) -> AgentState:
-        state["history"] = history[-6:]
-        return state
-
-    async def rag_tool_node(state: AgentState) -> AgentState:
-        state["tool_calls"] = [{"name": "rag_search", "arguments": {"top_k": 5}}]
-        state["search"] = rag_search(
-            SearchRequest(
-                user_id=request.user_id,
-                query=request.question,
-                knowledge_base_ids=request.knowledge_base_ids,
-            )
-        )
-        return state
-
-    async def answer_node(state: AgentState) -> AgentState:
-        state["answer"] = await generate_answer(request.question, state["search"]["results"], state["history"])
-        return state
-
-    if StateGraph is not None:
-        try:
-            graph = StateGraph(AgentState)
-            graph.add_node("memory", memory_node)
-            graph.add_node("rag_tool", rag_tool_node)
-            graph.add_node("compose_answer", answer_node)
-            graph.set_entry_point("memory")
-            graph.add_edge("memory", "rag_tool")
-            graph.add_edge("rag_tool", "compose_answer")
-            graph.add_edge("compose_answer", END)
-            return await graph.compile().ainvoke({"question": request.question})
-        except Exception:
-            pass
-
-    state: AgentState = {"question": request.question}
-    state = await memory_node(state)
-    state = await rag_tool_node(state)
-    return await answer_node(state)
+    return await run_agent_graph_impl(request)
 
 
 def build_agent_response(state: dict[str, Any]) -> AgentResponse:
-    results = state.get("search", {}).get("results", [])
-    citations = [
-        {
-            "chunk_id": item["chunk_id"],
-            "document_id": item["document_id"],
-            "knowledge_base_id": item["knowledge_base_id"],
-            "filename": item["filename"],
-            "score": item["score"],
-            "text": item["text"],
-        }
-        for item in results
-    ]
-    return AgentResponse(
-        answer=state.get("answer") or compose_retrieval_answer(state.get("question", ""), results),
-        citations=citations,
-        tool_calls=state.get("tool_calls", []),
-    )
+    return build_agent_response_from_state(state)
 
 
 @app.post("/ai/documents/parse")
@@ -879,49 +780,18 @@ def rag_search(request: SearchRequest) -> dict[str, Any]:
 
 @app.post("/ai/agent/run")
 async def agent_run(request: ChatRequest) -> AgentResponse:
-    history = MEMORY.setdefault(request.session_id, [])
     state = await run_agent_graph(request)
-    response = build_agent_response(state)
-    history.append({"role": "user", "content": request.question})
-    history.append({"role": "assistant", "content": response.answer})
-    return response
+    return build_agent_response(state)
 
 
 @app.post("/ai/chat/stream")
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
     async def events():
-        history = MEMORY.setdefault(request.session_id, [])
-        tool_call = {"name": "rag_search", "arguments": {"top_k": 5}}
-        yield format_sse("tool", tool_call["name"])
-
-        search = rag_search(
-            SearchRequest(
-                user_id=request.user_id,
-                query=request.question,
-                knowledge_base_ids=request.knowledge_base_ids,
-            )
-        )
-        contexts = search["results"]
-        answer_parts: list[str] = []
-
-        if MODEL_API_KEY and contexts:
-            try:
-                async for token in stream_model_tokens(request.question, contexts, history):
-                    answer_parts.append(token)
-                    yield format_sse("token", token)
-            except httpx.HTTPError as ex:
-                print(f"Model streaming failed, falling back to local answer: {ex}")
-
-        if not answer_parts:
-            fallback_answer = compose_retrieval_answer(request.question, contexts)
-            answer_parts.append(fallback_answer)
-            for token in fallback_answer.split():
-                yield format_sse("token", f"{token} ")
-                await asyncio.sleep(0.01)
-
-        answer = "".join(answer_parts)
-        history.append({"role": "user", "content": request.question})
-        history.append({"role": "assistant", "content": answer})
-        yield format_sse("done", "[DONE]")
+        try:
+            async for event, data in stream_agent_events(request):
+                yield format_sse(event, data)
+        except Exception as ex:
+            yield format_sse("error", f"AI chat failed: {ex}")
+            yield format_sse("done", "[DONE]")
 
     return StreamingResponse(events(), media_type="text/event-stream")

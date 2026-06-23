@@ -37,6 +37,10 @@ services:
       MODEL_BASE_URL: ${MODEL_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       MODEL_API_KEY: ${MODEL_API_KEY:-}
       MODEL_NAME: ${MODEL_NAME:-qwen3.7-plus}
+      TEXT2SQL_SCHEMA_TOP_K: ${TEXT2SQL_SCHEMA_TOP_K:-2}
+      TEXT2SQL_MAX_REPAIRS: ${TEXT2SQL_MAX_REPAIRS:-1}
+      TEXT2SQL_PLANNER_TIMEOUT_SECONDS: ${TEXT2SQL_PLANNER_TIMEOUT_SECONDS:-10}
+      TEXT2SQL_PLANNER_MODEL: ${TEXT2SQL_PLANNER_MODEL:-qwen3.7-plus}
     depends_on:
       - pgvector
     ports:

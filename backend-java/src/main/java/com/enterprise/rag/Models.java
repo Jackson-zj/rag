@@ -15,6 +15,7 @@ record CreateKnowledgeBaseRequest(String name, String description) {}
 record UploadDocumentRequest(String knowledgeBaseId, String filename, String content) {}
 record DocumentView(String id, String knowledgeBaseId, String filename, String status, Instant createdAt) {}
 record CreateChatSessionRequest(String title, List<String> knowledgeBaseIds) {}
+record UpdateChatSessionRequest(String title) {}
 record ChatSessionView(String id, String userId, String title, List<String> knowledgeBaseIds, Instant createdAt) {}
 record ChatMessageView(String id, String sessionId, String role, String content, Instant createdAt) {}
 record ChatRequest(String question) {}

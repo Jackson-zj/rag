@@ -42,6 +42,10 @@ class UserRepository {
                 """);
         createSeedUser("u-admin", "admin", "admin123", "role-admin", passwordEncoder);
         createSeedUser("u-analyst", "analyst", "analyst123", "role-analyst", passwordEncoder);
+        for (int employee = 1; employee <= 5; employee += 1) {
+            createSeedUser("u-user" + employee, "user" + employee, "user123", "role-user", passwordEncoder);
+        }
+        seedEmployeeData();
         jdbc.update("""
                 INSERT INTO role_knowledge_bases (role_id, knowledge_base_id)
                 SELECT 'role-admin', id FROM knowledge_bases
@@ -141,17 +145,197 @@ class UserRepository {
                   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS attendance_records (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                  attendance_date DATE NOT NULL,
+                  clock_in TIME,
+                  clock_out TIME,
+                  status TEXT NOT NULL CHECK (status IN ('NORMAL', 'LATE', 'EARLY_LEAVE', 'ABSENT', 'LEAVE')),
+                  work_minutes INT NOT NULL DEFAULT 0 CHECK (work_minutes >= 0),
+                  overtime_minutes INT NOT NULL DEFAULT 0 CHECK (overtime_minutes >= 0),
+                  remark TEXT NOT NULL DEFAULT '',
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  UNIQUE (user_id, attendance_date)
+                )
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS employee_work_logs (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                  log_date DATE NOT NULL,
+                  project_name TEXT NOT NULL,
+                  work_summary TEXT NOT NULL,
+                  work_hours NUMERIC(4, 1) NOT NULL CHECK (work_hours >= 0 AND work_hours <= 24),
+                  completion_status TEXT NOT NULL CHECK (completion_status IN ('COMPLETED', 'IN_PROGRESS', 'BLOCKED')),
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  UNIQUE (user_id, log_date)
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_attendance_user_date ON attendance_records (user_id, attendance_date DESC)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_work_logs_user_date ON employee_work_logs (user_id, log_date DESC)");
+        jdbc.execute("""
+                CREATE OR REPLACE VIEW agent_attendance_records AS
+                SELECT attendance.id,
+                       attendance.user_id,
+                       users.username,
+                       attendance.attendance_date,
+                       attendance.clock_in,
+                       attendance.clock_out,
+                       attendance.status,
+                       attendance.work_minutes,
+                       attendance.overtime_minutes,
+                       attendance.remark
+                FROM attendance_records attendance
+                JOIN users ON users.id = attendance.user_id
+                """);
+        jdbc.execute("""
+                CREATE OR REPLACE VIEW agent_employee_work_logs AS
+                SELECT logs.id,
+                       logs.user_id,
+                       users.username,
+                       logs.log_date,
+                       logs.project_name,
+                       logs.work_summary,
+                       logs.work_hours,
+                       logs.completion_status
+                FROM employee_work_logs logs
+                JOIN users ON users.id = logs.user_id
+                """);
+        jdbc.execute("""
+                CREATE OR REPLACE VIEW agent_chat_sessions AS
+                SELECT sessions.id,
+                       sessions.user_id,
+                       users.username,
+                       sessions.title,
+                       sessions.created_at
+                FROM chat_sessions sessions
+                JOIN users ON users.id = sessions.user_id
+                """);
+        jdbc.execute("""
+                CREATE OR REPLACE VIEW agent_chat_messages AS
+                SELECT messages.id,
+                       messages.session_id,
+                       sessions.user_id,
+                       users.username,
+                       messages.role,
+                       messages.created_at
+                FROM chat_messages messages
+                JOIN chat_sessions sessions ON sessions.id = messages.session_id
+                JOIN users ON users.id = sessions.user_id
+                """);
     }
 
-    private void createSeedUser(String id, String username, String password, String roleId, PasswordEncoder encoder) {
-        Integer count = jdbc.queryForObject("SELECT count(*) FROM users WHERE id = ? OR username = ?", Integer.class, id, username);
-        if (count != null && count == 0) {
+    private String createSeedUser(String id, String username, String password, String roleId, PasswordEncoder encoder) {
+        List<String> existingIds = jdbc.query(
+                "SELECT id FROM users WHERE id = ? OR username = ? ORDER BY CASE WHEN username = ? THEN 0 ELSE 1 END",
+                (rs, rowNum) -> rs.getString("id"),
+                id,
+                username,
+                username
+        );
+        String actualId = existingIds.stream().findFirst().orElse(null);
+        if (actualId == null) {
             jdbc.update("""
                     INSERT INTO users (id, username, password_hash, disabled)
                     VALUES (?, ?, ?, false)
                     """, id, username, encoder.encode(password));
+            actualId = id;
         }
-        jdbc.update("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?) ON CONFLICT DO NOTHING", id, roleId);
+        jdbc.update("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?) ON CONFLICT DO NOTHING", actualId, roleId);
+        return actualId;
+    }
+
+    private void seedEmployeeData() {
+        jdbc.update("""
+                WITH seed_users AS (
+                  SELECT id, username, row_number() OVER (ORDER BY username)::int AS user_no
+                  FROM users
+                  WHERE username IN ('user1', 'user2', 'user3', 'user4', 'user5')
+                ),
+                work_days AS (
+                  SELECT work_date::date,
+                         row_number() OVER (ORDER BY work_date DESC)::int AS day_no
+                  FROM (
+                    SELECT work_date
+                    FROM generate_series(current_date - interval '10 days', current_date, interval '1 day') work_date
+                    WHERE extract(isodow FROM work_date) <= 5
+                    ORDER BY work_date DESC
+                    LIMIT 4
+                  ) recent_days
+                )
+                INSERT INTO attendance_records
+                  (id, user_id, attendance_date, clock_in, clock_out, status, work_minutes, overtime_minutes, remark, created_at)
+                SELECT 'seed-attendance-' || seed_users.username || '-' || work_days.day_no,
+                       seed_users.id,
+                       work_days.work_date,
+                       CASE WHEN (seed_users.user_no + work_days.day_no) % 5 IN (3, 4) THEN NULL
+                            ELSE time '08:30' + (((seed_users.user_no + work_days.day_no) % 4) * interval '10 minutes') END,
+                       CASE WHEN (seed_users.user_no + work_days.day_no) % 5 IN (3, 4) THEN NULL
+                            ELSE time '17:30' - (((seed_users.user_no + work_days.day_no) % 3) * interval '10 minutes') END,
+                       CASE (seed_users.user_no + work_days.day_no) % 5
+                         WHEN 0 THEN 'NORMAL'
+                         WHEN 1 THEN 'LATE'
+                         WHEN 2 THEN 'EARLY_LEAVE'
+                         WHEN 3 THEN 'LEAVE'
+                         ELSE 'ABSENT'
+                       END,
+                       CASE (seed_users.user_no + work_days.day_no) % 5
+                         WHEN 0 THEN 480 WHEN 1 THEN 450 WHEN 2 THEN 420 ELSE 0
+                       END,
+                       CASE WHEN (seed_users.user_no * work_days.day_no) % 3 = 0 THEN 60 ELSE 0 END,
+                       CASE (seed_users.user_no + work_days.day_no) % 5
+                         WHEN 0 THEN '考勤正常'
+                         WHEN 1 THEN '早高峰迟到'
+                         WHEN 2 THEN '提前离岗'
+                         WHEN 3 THEN '已批准请假'
+                         ELSE '未打卡'
+                       END,
+                       work_days.work_date + time '18:00'
+                FROM seed_users
+                CROSS JOIN work_days
+                ON CONFLICT DO NOTHING
+                """);
+        jdbc.update("""
+                WITH seed_users AS (
+                  SELECT id, username, row_number() OVER (ORDER BY username)::int AS user_no
+                  FROM users
+                  WHERE username IN ('user1', 'user2', 'user3', 'user4', 'user5')
+                ),
+                work_days AS (
+                  SELECT work_date::date,
+                         row_number() OVER (ORDER BY work_date DESC)::int AS day_no
+                  FROM (
+                    SELECT work_date
+                    FROM generate_series(current_date - interval '10 days', current_date, interval '1 day') work_date
+                    WHERE extract(isodow FROM work_date) <= 5
+                    ORDER BY work_date DESC
+                    LIMIT 4
+                  ) recent_days
+                )
+                INSERT INTO employee_work_logs
+                  (id, user_id, log_date, project_name, work_summary, work_hours, completion_status, created_at)
+                SELECT 'seed-worklog-' || seed_users.username || '-' || work_days.day_no,
+                       seed_users.id,
+                       work_days.work_date,
+                       CASE (seed_users.user_no + work_days.day_no) % 3
+                         WHEN 0 THEN '知识库建设'
+                         WHEN 1 THEN '员工服务平台'
+                         ELSE '数据质量治理'
+                       END,
+                       '完成第 ' || work_days.day_no || ' 项计划工作，更新进度并记录后续事项。',
+                       (6.5 + ((seed_users.user_no + work_days.day_no) % 4) * 0.5)::numeric(4, 1),
+                       CASE (seed_users.user_no + work_days.day_no) % 4
+                         WHEN 0 THEN 'IN_PROGRESS'
+                         WHEN 1 THEN 'BLOCKED'
+                         ELSE 'COMPLETED'
+                       END,
+                       work_days.work_date + time '18:30'
+                FROM seed_users
+                CROSS JOIN work_days
+                ON CONFLICT DO NOTHING
+                """);
     }
 
     Optional<UserAccount> findAccountByUsername(String username) {

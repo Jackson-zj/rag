@@ -213,6 +213,20 @@ class ApiController {
         return chats.listSessions(user.id());
     }
 
+    @PatchMapping("/chat/sessions/{id}")
+    ChatSessionView renameSession(@RequestHeader("Authorization") String authorizationHeader,
+                                  @PathVariable("id") String id,
+                                  @RequestBody UpdateChatSessionRequest request) {
+        CurrentUser user = auth.currentUser(authorizationHeader);
+        ChatSessionView session = requireOwnSession(user, id);
+        String title = request.title() == null ? "" : request.title().trim();
+        int titleLength = title.codePointCount(0, title.length());
+        if (titleLength < 1 || titleLength > 60) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "会话标题长度必须为 1 至 60 个字符");
+        }
+        return chats.renameSession(session.id(), title);
+    }
+
     @GetMapping("/chat/sessions/{id}/messages")
     List<ChatMessageView> messages(@RequestHeader("Authorization") String authorizationHeader,
                                    @PathVariable("id") String id,

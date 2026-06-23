@@ -39,6 +39,11 @@ class ChatRepository {
                 """, (rs, rowNum) -> rs.getString("id"), userId).stream().map(id -> getSession(id).orElseThrow()).toList();
     }
 
+    ChatSessionView renameSession(String id, String title) {
+        jdbc.update("UPDATE chat_sessions SET title = ? WHERE id = ?", title, id);
+        return getSession(id).orElseThrow();
+    }
+
     java.util.Optional<ChatSessionView> getSession(String id) {
         return jdbc.query("""
                 SELECT id, user_id, title, created_at

@@ -2,9 +2,15 @@ package com.enterprise.rag;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
+
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -118,6 +124,52 @@ class ApiControllerTest {
     }
 
     @Test
+    void ownerCanRenameSession() {
+        CurrentUser user = new CurrentUser("u-user", "user", false, List.of("USER"), List.of("kb-hr"));
+        ChatSessionView original = new ChatSessionView("chat-1", "u-user", "旧标题", List.of("kb-hr"), Instant.now());
+        ChatSessionView renamed = new ChatSessionView("chat-1", "u-user", "新标题", List.of("kb-hr"), original.createdAt());
+        when(auth.currentUser("Bearer user")).thenReturn(user);
+        when(chats.getSession("chat-1")).thenReturn(Optional.of(original));
+        when(chats.renameSession("chat-1", "新标题")).thenReturn(renamed);
+
+        ChatSessionView result = controller.renameSession("Bearer user", "chat-1", new UpdateChatSessionRequest("  新标题  "));
+
+        assertEquals("新标题", result.title());
+        verify(chats).renameSession("chat-1", "新标题");
+    }
+
+    @Test
+    void userCannotRenameAnotherUsersSession() {
+        CurrentUser user = new CurrentUser("u-user", "user", false, List.of("USER"), List.of("kb-hr"));
+        ChatSessionView other = new ChatSessionView("chat-other", "u-other", "别人的会话", List.of("kb-hr"), Instant.now());
+        when(auth.currentUser("Bearer user")).thenReturn(user);
+        when(chats.getSession("chat-other")).thenReturn(Optional.of(other));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
+                controller.renameSession("Bearer user", "chat-other", new UpdateChatSessionRequest("越权标题")));
+
+        assertEquals(403, ex.getStatusCode().value());
+        verify(chats, never()).renameSession(any(), any());
+    }
+
+    @Test
+    void renameSessionRejectsBlankAndOverlongTitles() {
+        CurrentUser user = new CurrentUser("u-user", "user", false, List.of("USER"), List.of("kb-hr"));
+        ChatSessionView session = new ChatSessionView("chat-1", "u-user", "原标题", List.of("kb-hr"), Instant.now());
+        when(auth.currentUser("Bearer user")).thenReturn(user);
+        when(chats.getSession("chat-1")).thenReturn(Optional.of(session));
+
+        ResponseStatusException blank = assertThrows(ResponseStatusException.class, () ->
+                controller.renameSession("Bearer user", "chat-1", new UpdateChatSessionRequest("   ")));
+        ResponseStatusException longTitle = assertThrows(ResponseStatusException.class, () ->
+                controller.renameSession("Bearer user", "chat-1", new UpdateChatSessionRequest("标".repeat(61))));
+
+        assertEquals(400, blank.getStatusCode().value());
+        assertEquals(400, longTitle.getStatusCode().value());
+        verify(chats, never()).renameSession(any(), any());
+    }
+
+    @Test
     void messagesWithoutRoundsReturnsAllSessionMessages() {
         CurrentUser user = new CurrentUser("u-user", "user", false, List.of("USER"), List.of("kb-hr"));
         ChatSessionView session = new ChatSessionView("chat-1", "u-user", "chat", List.of("kb-hr"), Instant.now());
@@ -213,6 +265,41 @@ class ApiControllerTest {
 
         assertEquals(1, visible.size());
         assertEquals("kb-hr", visible.get(0).id());
+    }
+
+    @Test
+    void aiClientDoesNotAppendToolResultOrCitationEventsToAnswer() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/ai/chat/stream", exchange -> {
+            String body = """
+                    event: tool_result
+                    data: {"name":"sql_query","status":"ok","summary":"rows found"}
+
+                    event: citation
+                    data: {"type":"sql","summary":"rows found"}
+
+                    event: token
+                    data: hello
+
+                    event: done
+                    data: [DONE]
+
+                    """;
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream; charset=UTF-8");
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiClient client = new AiClient(new ObjectMapper(), "http://127.0.0.1:" + server.getAddress().getPort());
+            String answer = client.streamChat(Map.of("question", "q"), new SseEmitter());
+
+            assertEquals("hello", answer);
+        } finally {
+            server.stop(0);
+        }
     }
 
     @SuppressWarnings("unchecked")

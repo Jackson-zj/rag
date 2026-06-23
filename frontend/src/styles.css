@@ -361,7 +361,146 @@ textarea {
 
 .chat-only {
   margin: 0 auto;
-  max-width: 980px;
+  max-width: 1200px;
+}
+
+.chat-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.session-history {
+  background: white;
+  border: 1px solid #dbe3ea;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 160px);
+  min-height: 520px;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.session-history-header,
+.chat-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.session-history-header {
+  border-bottom: 1px solid #e4ebf0;
+  padding: 2px 2px 10px;
+}
+
+.session-history-header h2,
+.chat-header h2 {
+  align-items: center;
+  display: flex;
+  font-size: 16px;
+  gap: 8px;
+  margin: 0;
+}
+
+.session-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  padding-top: 8px;
+}
+
+.session-row {
+  align-items: center;
+  border-left: 3px solid transparent;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  min-height: 58px;
+}
+
+.session-row.active {
+  background: #e8f1f4;
+  border-left-color: #176b87;
+}
+
+.session-select {
+  align-items: flex-start;
+  background: transparent;
+  color: #172026;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  justify-content: center;
+  min-height: 56px;
+  min-width: 0;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.session-select strong {
+  display: block;
+  font-size: 14px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-select span {
+  color: #687985;
+  font-size: 12px;
+}
+
+.icon-button {
+  aspect-ratio: 1;
+  min-height: 36px;
+  padding: 0;
+  width: 36px;
+}
+
+.icon-button.subtle {
+  background: transparent;
+  color: #4f6672;
+}
+
+.session-edit {
+  align-items: center;
+  display: grid;
+  gap: 4px;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) 36px 36px;
+  padding: 4px;
+}
+
+.session-edit input {
+  min-height: 36px;
+  padding: 0 8px;
+}
+
+.chat-layout .chat {
+  grid-column: auto;
+  margin: 0;
+  min-width: 0;
+}
+
+.chat-header {
+  margin-bottom: 12px;
+}
+
+.chat-header p {
+  color: #5b6872;
+  font-size: 13px;
+  margin: 4px 0 0;
+  max-width: min(60vw, 620px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-toggle {
+  display: none;
 }
 
 .spin {
@@ -396,5 +535,33 @@ textarea {
 
   .message {
     max-width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  .workspace {
+    padding: 16px;
+  }
+
+  .chat-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .session-history {
+    display: none;
+    max-height: 260px;
+    min-height: 0;
+  }
+
+  .session-history.open {
+    display: flex;
+  }
+
+  .history-toggle {
+    display: inline-flex;
+  }
+
+  .chat-header p {
+    max-width: calc(100vw - 150px);
   }
 }

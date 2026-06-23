@@ -6,12 +6,12 @@
 
 ## 任务
 
-- [x] 后端数据库基础与认证 - 已完成，文件：`docs/tasks/backend-database-auth.md`
-- [x] 管理员用户角色与权限管理 - 已完成，文件：`docs/tasks/backend-admin-rbac.md`
-- [x] 知识库、文档与聊天持久化 - 已完成，文件：`docs/tasks/backend-doc-chat-persistence.md`
-- [x] AI 服务权限契约适配 - 已完成，文件：`docs/tasks/ai-permission-contract.md`
-- [x] 前端登录注册与角色化界面 - 已完成，文件：`docs/tasks/frontend-auth-rbac-ui.md`
-- [x] 文档更新与整体验证 - 已完成，文件：`docs/tasks/docs-verification.md`
+- [x] 后端数据库基础与认证 - 已完成，文件：`docs/platform/tasks/backend-database-auth.md`
+- [x] 管理员用户角色与权限管理 - 已完成，文件：`docs/platform/tasks/backend-admin-rbac.md`
+- [x] 知识库、文档与聊天持久化 - 已完成，文件：`docs/platform/tasks/backend-doc-chat-persistence.md`
+- [x] AI 服务权限契约适配 - 已完成，文件：`docs/platform/tasks/ai-permission-contract.md`
+- [x] 前端登录注册与角色化界面 - 已完成，文件：`docs/platform/tasks/frontend-auth-rbac-ui.md`
+- [x] 文档更新与整体验证 - 已完成，文件：`docs/platform/tasks/docs-verification.md`
 
 ## 已确认决策
 

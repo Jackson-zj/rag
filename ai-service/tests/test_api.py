@@ -4,7 +4,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import app.main as main
-from app.main import CHUNKS, MEMORY, app, compose_retrieval_answer, generate_answer, split_text
+from app.main import CHUNKS, MEMORY, app, compose_retrieval_answer, generate_answer, route_intent, split_text, validate_sql
 
 
 class AiApiTest(unittest.TestCase):
@@ -54,6 +54,162 @@ class AiApiTest(unittest.TestCase):
         self.assertIn("citations", body)
         self.assertIn("tool_calls", body)
         self.assertEqual("rag_search", body["tool_calls"][0]["name"])
+        self.assertIn("tool_results", body)
+        self.assertEqual("rag", body["route"])
+
+    def test_agent_routes_metadata_question_to_sql_tool(self):
+        sql_result = {
+            "query": "What documents and statuses are currently indexed?",
+            "sql": "SELECT filename, status, chunk_count FROM documents LIMIT 50",
+            "rows": [
+                {"knowledge_base_id": "kb-hr", "filename": "policy-a.pdf", "status": "READY", "chunk_count": 14},
+                {"knowledge_base_id": "kb-hr", "filename": "policy-b.pdf", "status": "READY", "chunk_count": 17},
+            ],
+            "summary": "SQL 查询完成，返回 2 条记录，查询范围：授权知识库 1 个。",
+            "row_count": 2,
+            "scope": "授权知识库 1 个",
+            "domain": "document",
+            "planner": "fallback",
+        }
+
+        async def fake_pipeline(state):
+            state.setdefault("tool_calls", []).append({"name": "sql_query", "arguments": {"domain": "document", "planner": "fallback"}})
+            state["sql"] = sql_result
+            return state
+
+        with patch("app.agent.StateGraph", None), patch("app.agent.run_sql_pipeline", new=fake_pipeline):
+            response = self.client.post(
+                "/ai/agent/run",
+                json={
+                    "user_id": "u-admin",
+                    "session_id": "session-sql-1",
+                    "question": "What documents and statuses are currently indexed?",
+                    "knowledge_base_ids": ["kb-hr"],
+                },
+            )
+        body = response.json()
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("sql", body["route"])
+        self.assertEqual("sql_query", body["tool_calls"][0]["name"])
+        self.assertIn("2", body["answer"])
+        self.assertIn("31", body["answer"])
+        self.assertNotIn("knowledge_base_id=", body["answer"])
+        self.assertNotIn("结构化查询结果", body["answer"])
+        self.assertFalse(any(call["name"] == "rag_search" for call in body["tool_calls"]))
+
+    def test_agent_routes_mixed_question_to_sql_and_rag_tools(self):
+        self.client.post(
+            "/ai/documents/index",
+            json={
+                "document_id": "doc-mixed-1",
+                "knowledge_base_id": "kb-hr",
+                "filename": "leave-policy.txt",
+                "content": "Annual leave policy says employees receive five days after one year.",
+                "allowed_user_ids": ["u-admin"],
+            },
+        )
+
+        async def fake_pipeline(state):
+            state.setdefault("tool_calls", []).append({"name": "sql_query", "arguments": {"domain": "document", "planner": "fallback"}})
+            state["sql"] = {
+                "query": state["question"],
+                "rows": [{"filename": "leave-policy.txt", "status": "READY", "chunk_count": 1}],
+                "summary": "SQL 查询完成，返回 1 条记录，查询范围：授权知识库 1 个。",
+                "row_count": 1,
+                "scope": "授权知识库 1 个",
+                "domain": "document",
+                "planner": "fallback",
+            }
+            return state
+
+        with patch("app.agent.StateGraph", None), patch("app.agent.run_sql_pipeline", new=fake_pipeline):
+            response = self.client.post(
+                "/ai/agent/run",
+                json={
+                    "user_id": "u-admin",
+                    "session_id": "session-mixed-1",
+                    "question": "Which recent documents explain the annual leave policy?",
+                    "knowledge_base_ids": ["kb-hr"],
+                },
+            )
+        body = response.json()
+        tool_names = [call["name"] for call in body["tool_calls"]]
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("mixed", body["route"])
+        self.assertIn("sql_query", tool_names)
+        self.assertIn("rag_search", tool_names)
+        self.assertTrue(body["citations"])
+
+    def test_route_intent_classifies_basic_paths(self):
+        self.assertEqual("sql", route_intent("List current knowledge bases and document status"))
+        self.assertEqual("sql", route_intent("系统总共有多少轮对话"))
+        self.assertEqual("sql", route_intent("汇总 user1 本周考勤和加班情况"))
+        self.assertEqual("sql", route_intent("user2 最近的工作日志和工作内容"))
+        self.assertEqual("mixed", route_intent("考勤制度规定是什么"))
+        self.assertEqual("rag", route_intent("What is the reimbursement rule?"))
+        self.assertEqual("mixed", route_intent("Which documents explain reimbursement rules?"))
+        self.assertEqual("direct", route_intent("你好"))
+
+    def test_validate_sql_rejects_unsafe_queries(self):
+        self.assertEqual("SELECT id FROM documents LIMIT 50", validate_sql("SELECT id FROM documents LIMIT 500"))
+        self.assertEqual(
+            "SELECT username FROM agent_attendance_records LIMIT 50",
+            validate_sql("SELECT username FROM agent_attendance_records"),
+        )
+        with self.assertRaises(ValueError):
+            validate_sql("DELETE FROM documents")
+        with self.assertRaises(ValueError):
+            validate_sql("SELECT password_hash FROM users")
+        with self.assertRaises(ValueError):
+            validate_sql("SELECT * FROM attendance_records")
+        with self.assertRaises(ValueError):
+            validate_sql("SELECT id FROM documents; SELECT id FROM knowledge_bases")
+
+    def test_employee_sql_response_does_not_expose_raw_rows(self):
+        sql_result = {
+            "query": "汇总我的考勤",
+            "sql": "SELECT ...",
+            "rows": [
+                {
+                    "username": "user1",
+                    "attendance_date": "2026-06-20",
+                    "status": "LATE",
+                    "overtime_minutes": 60,
+                    "remark": "private-row-marker",
+                }
+            ],
+            "summary": "SQL 查询完成，返回 1 条记录，查询范围：本人 user1。",
+            "row_count": 1,
+            "scope": "本人 user1",
+            "domain": "attendance",
+            "planner": "fallback",
+            "denied": False,
+        }
+
+        async def fake_pipeline(state):
+            state.setdefault("tool_calls", []).append({"name": "sql_query", "arguments": {"domain": "attendance", "planner": "fallback"}})
+            state["sql"] = sql_result
+            return state
+
+        with patch("app.agent.StateGraph", None), patch("app.agent.run_sql_pipeline", new=fake_pipeline):
+            response = self.client.post(
+                "/ai/agent/run",
+                json={
+                    "user_id": "u-user1",
+                    "session_id": "session-attendance-safe",
+                    "question": "汇总我的考勤",
+                    "knowledge_base_ids": [],
+                },
+            )
+
+        body = response.json()
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("sql", body["route"])
+        self.assertEqual(1, body["citations"][0]["row_count"])
+        self.assertNotIn("rows", body["citations"][0])
+        self.assertNotIn("private-row-marker", response.text)
 
     def test_search_uses_knowledge_base_scope_when_legacy_acl_is_empty(self):
         self.client.post(

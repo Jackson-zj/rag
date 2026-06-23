@@ -6,9 +6,9 @@
 
 ## 输入文档
 
-- `docs/proposal.md`
-- `docs/high-level-design.md`
-- `docs/detailed-design.md`
+- `docs/platform/proposal.md`
+- `docs/platform/high-level-design.md`
+- `docs/platform/detailed-design.md`
 
 ## 预期修改文件
 

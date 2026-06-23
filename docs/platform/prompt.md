@@ -6,28 +6,28 @@
 
 必须读取并遵守：
 
-- `docs/proposal.md`
-- `docs/high-level-design.md`
-- `docs/detailed-design.md`
-- `docs/tasks/progress.md`
-- `docs/tasks/backend-database-auth.md`
-- `docs/tasks/backend-admin-rbac.md`
-- `docs/tasks/backend-doc-chat-persistence.md`
-- `docs/tasks/ai-permission-contract.md`
-- `docs/tasks/frontend-auth-rbac-ui.md`
-- `docs/tasks/docs-verification.md`
+- `docs/platform/proposal.md`
+- `docs/platform/high-level-design.md`
+- `docs/platform/detailed-design.md`
+- `docs/platform/tasks/progress.md`
+- `docs/platform/tasks/backend-database-auth.md`
+- `docs/platform/tasks/backend-admin-rbac.md`
+- `docs/platform/tasks/backend-doc-chat-persistence.md`
+- `docs/platform/tasks/ai-permission-contract.md`
+- `docs/platform/tasks/frontend-auth-rbac-ui.md`
+- `docs/platform/tasks/docs-verification.md`
 - `AGENTS.md`
 
 ## 主代理职责
 
-1. 从 `docs/tasks/progress.md` 选择下一个未阻塞任务。
+1. 从 `docs/platform/tasks/progress.md` 选择下一个未阻塞任务。
 2. 每次只实现一个任务或紧密相关的一组任务。
 3. 实施前读取任务文件和相关源码。
 4. 保持改动范围与任务一致，避免无关重构。
 5. 添加或更新聚焦测试。
 6. 运行任务列出的检查命令。
 7. 检查 `git diff`，确认无无关改动、无密钥、无生成物误改。
-8. 更新 `docs/tasks/progress.md`，记录任务状态、命令结果、失败原因和下一步。
+8. 更新 `docs/platform/tasks/progress.md`，记录任务状态、命令结果、失败原因和下一步。
 9. 最终汇报已完成内容、验证结果和剩余风险。
 
 ## 子代理职责
@@ -43,7 +43,7 @@
 
 ## 实施顺序
 
-按 `docs/tasks/progress.md` 中的任务顺序执行，除非当前任务被明确标记为阻塞。
+按 `docs/platform/tasks/progress.md` 中的任务顺序执行，除非当前任务被明确标记为阻塞。
 
 ## 验收标准
 

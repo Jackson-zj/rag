@@ -3,17 +3,22 @@ import { createRoot } from "react-dom/client";
 import {
   AlertCircle,
   Bot,
+  Check,
   Database,
+  History,
   FileUp,
   KeyRound,
   Loader2,
   LogOut,
   MessageCircle,
+  Pencil,
+  Plus,
   RefreshCw,
   Send,
   ShieldCheck,
   UserPlus,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import "./styles.css";
@@ -21,7 +26,7 @@ import "./styles.css";
 type User = { id: string; username: string; disabled: boolean; roles: string[]; knowledgeBaseIds: string[] };
 type Role = { id: string; name: string; description: string; systemRole: boolean; knowledgeBaseIds: string[] };
 type KnowledgeBase = { id: string; name: string; description: string };
-type ChatSession = { id: string; title: string; knowledgeBaseIds: string[] };
+type ChatSession = { id: string; userId: string; title: string; knowledgeBaseIds: string[]; createdAt: string };
 type ChatRole = "user" | "assistant" | "system";
 type ChatTurn = { id: string; role: ChatRole; content: string };
 type ChatMessage = ChatTurn & { sessionId: string; createdAt: string };
@@ -31,8 +36,44 @@ type AdminPage = "upload" | "users" | "roles" | "chat";
 const apiBase = import.meta.env.VITE_API_BASE ?? "";
 const pdfWorkerSrc = `${pdfWorkerUrl}?v=module-mime`;
 const historyRounds = 10;
-const defaultQuestion = "员工报销需要注意什么？";
+const sessionTitleMaxLength = 60;
 const defaultDocText = "员工报销需要在费用发生后 30 天内提交发票、付款凭证和审批单。差旅费用需要关联出差申请。";
+
+function sessionStorageKey(userId: string): string {
+  return `rag.activeSession.${userId}`;
+}
+
+function rememberedSessionId(userId: string): string | null {
+  try {
+    return localStorage.getItem(sessionStorageKey(userId));
+  } catch {
+    return null;
+  }
+}
+
+function rememberSession(userId: string, sessionId: string | null) {
+  try {
+    if (sessionId) localStorage.setItem(sessionStorageKey(userId), sessionId);
+    else localStorage.removeItem(sessionStorageKey(userId));
+  } catch {
+    // Browsers can disable persistent storage; session switching still works in memory.
+  }
+}
+
+function titleFromQuestion(question: string): string {
+  return Array.from(question.trim().replace(/\s+/g, " ")).slice(0, 32).join("") || "新对话";
+}
+
+function formatSessionTime(createdAt: string): string {
+  const value = new Date(createdAt);
+  if (Number.isNaN(value.getTime())) return "";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(value);
+}
 
 async function request<T>(path: string, token: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
@@ -67,6 +108,23 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
     .map((line) => line.replace(/^data:\s?/, ""))
     .join("\n");
   return { event, data };
+}
+
+function summarizeAgentEvent(event: string, data: string): string {
+  try {
+    const body = JSON.parse(data) as { name?: string; status?: string; summary?: string; type?: string; filename?: string; score?: number };
+    if (event === "tool_result") {
+      const status = body.status ? ` (${body.status})` : "";
+      return `${body.name ?? "tool"}${status}: ${body.summary ?? data}`;
+    }
+    if (event === "citation") {
+      if (body.type === "rag") return `citation: ${body.filename ?? "document"} score=${body.score ?? "-"}`;
+      if (body.type === "sql") return `citation: ${body.summary ?? "SQL summary"}`;
+    }
+  } catch {
+    return data;
+  }
+  return data;
 }
 
 function keepLatestRounds(messages: ChatTurn[], rounds = historyRounds): ChatTurn[] {
@@ -172,8 +230,12 @@ function App() {
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [session, setSession] = useState<ChatSession | null>(null);
-  const [question, setQuestion] = useState(defaultQuestion);
+  const [sessionHistoryOpen, setSessionHistoryOpen] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingSessionTitle, setEditingSessionTitle] = useState("");
+  const [question, setQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatTurn[]>([]);
   const [events, setEvents] = useState<string[]>([]);
   const [docText, setDocText] = useState(defaultDocText);
@@ -203,16 +265,19 @@ function App() {
 
   async function hydrate(authToken: string, current: User) {
     const visibleKbs = await request<KnowledgeBase[]>("/api/knowledge-bases", authToken);
-    const sessions = await request<ChatSession[]>("/api/chat/sessions", authToken);
-    const latestSession = sessions[0] ?? null;
-    const history = latestSession
-      ? await request<ChatMessage[]>(`/api/chat/sessions/${latestSession.id}/messages?rounds=${historyRounds}`, authToken)
+    const availableSessions = await request<ChatSession[]>("/api/chat/sessions", authToken);
+    const rememberedId = rememberedSessionId(current.id);
+    const restoredSession = availableSessions.find((item) => item.id === rememberedId) ?? availableSessions[0] ?? null;
+    const history = restoredSession
+      ? await request<ChatMessage[]>(`/api/chat/sessions/${restoredSession.id}/messages?rounds=${historyRounds}`, authToken)
       : [];
     setToken(authToken);
     setUser(current);
     setKbs(visibleKbs);
-    setSession(latestSession);
+    setSessions(availableSessions);
+    setSession(restoredSession);
     setChatMessages(keepLatestRounds(history));
+    rememberSession(current.id, restoredSession?.id ?? null);
     if (current.roles.includes("ADMIN")) {
       const [adminUsers, adminRoles] = await Promise.all([
         request<User[]>("/api/admin/users", authToken),
@@ -264,7 +329,12 @@ function App() {
     setUsers([]);
     setRoles([]);
     setKbs([]);
+    setSessions([]);
     setSession(null);
+    setSessionHistoryOpen(false);
+    setEditingSessionId(null);
+    setEditingSessionTitle("");
+    setQuestion("");
     setChatMessages([]);
     setEvents([]);
   }
@@ -378,13 +448,89 @@ function App() {
     }
   }
 
-  async function createSession(): Promise<ChatSession> {
+  async function createSession(firstQuestion: string): Promise<ChatSession> {
     if (!token) throw new Error("请先登录");
-    const body = isAdmin ? { title: "企业知识库问答", knowledgeBaseIds: selectedKbIds } : { title: "企业知识库问答" };
+    const title = titleFromQuestion(firstQuestion);
+    const body = isAdmin ? { title, knowledgeBaseIds: selectedKbIds } : { title };
     const next = await request<ChatSession>("/api/chat/sessions", token, { body });
+    setSessions((old) => [next, ...old.filter((item) => item.id !== next.id)]);
     setSession(next);
+    if (user) rememberSession(user.id, next.id);
     pushEvent("会话已创建");
     return next;
+  }
+
+  function startNewSession() {
+    if (busy !== "") return;
+    setSession(null);
+    setChatMessages([]);
+    setQuestion("");
+    setEvents([]);
+    setEditingSessionId(null);
+    setEditingSessionTitle("");
+    setSessionHistoryOpen(false);
+    if (user) rememberSession(user.id, null);
+  }
+
+  async function switchSession(next: ChatSession) {
+    if (!token || busy !== "" || next.id === session?.id) {
+      setSessionHistoryOpen(false);
+      return;
+    }
+    setBusy("history");
+    setError("");
+    setSuccess("");
+    try {
+      const history = await request<ChatMessage[]>(`/api/chat/sessions/${next.id}/messages?rounds=${historyRounds}`, token);
+      setSession(next);
+      setChatMessages(keepLatestRounds(history));
+      setQuestion("");
+      setEvents([]);
+      setEditingSessionId(null);
+      setEditingSessionTitle("");
+      setSessionHistoryOpen(false);
+      if (user) rememberSession(user.id, next.id);
+    } catch (ex) {
+      setError(ex instanceof Error ? ex.message : String(ex));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function beginRenameSession(target: ChatSession) {
+    if (busy !== "") return;
+    setEditingSessionId(target.id);
+    setEditingSessionTitle(target.title);
+  }
+
+  function cancelRenameSession() {
+    setEditingSessionId(null);
+    setEditingSessionTitle("");
+  }
+
+  async function renameSession(target: ChatSession) {
+    if (!token || busy !== "") return;
+    const title = editingSessionTitle.trim();
+    const length = Array.from(title).length;
+    if (length < 1 || length > sessionTitleMaxLength) {
+      setError(`会话标题长度必须为 1 至 ${sessionTitleMaxLength} 个字符`);
+      return;
+    }
+    setBusy("rename");
+    setError("");
+    try {
+      const updated = await request<ChatSession>(`/api/chat/sessions/${target.id}`, token, {
+        method: "PATCH",
+        body: { title }
+      });
+      setSessions((old) => old.map((item) => item.id === updated.id ? updated : item));
+      setSession((current) => current?.id === updated.id ? updated : current);
+      cancelRenameSession();
+    } catch (ex) {
+      setError(ex instanceof Error ? ex.message : String(ex));
+    } finally {
+      setBusy("");
+    }
   }
 
   async function ask() {
@@ -398,7 +544,7 @@ function App() {
     setChatMessages((old) => keepLatestRounds([...old, userTurn, { id: assistantId, role: "assistant", content: "" }]));
     setQuestion("");
     try {
-      const activeSession = session ?? await createSession();
+      const activeSession = session ?? await createSession(prompt);
       const response = await fetch(`${apiBase}/api/chat/sessions/${activeSession.id}/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -418,7 +564,8 @@ function App() {
         for (const part of parts) {
           const parsed = parseSseBlock(part);
           if (!parsed) continue;
-          if (parsed.event === "tool") pushEvent(`Agent 调用工具：${parsed.data}`);
+          if (parsed.event === "tool") pushEvent(`Agent tool: ${parsed.data}`);
+          if (parsed.event === "tool_result" || parsed.event === "citation") pushEvent(summarizeAgentEvent(parsed.event, parsed.data));
           if (parsed.event === "token") appendAssistantToken(assistantId, parsed.data);
           if (parsed.event === "error") {
             setError(parsed.data);
@@ -592,7 +739,32 @@ function App() {
 
         {(!isAdmin || adminPage === "chat") && (
           <div className="chat-only">
-            <ChatPanel messages={chatMessages} busy={busy} question={question} setQuestion={setQuestion} ask={ask} onKeyDown={handleQuestionKeyDown} />
+            <div className="chat-layout">
+              <SessionHistory
+                sessions={sessions}
+                activeSessionId={session?.id ?? null}
+                open={sessionHistoryOpen}
+                busy={busy}
+                editingSessionId={editingSessionId}
+                editingSessionTitle={editingSessionTitle}
+                setEditingSessionTitle={setEditingSessionTitle}
+                newSession={startNewSession}
+                switchSession={switchSession}
+                beginRename={beginRenameSession}
+                cancelRename={cancelRenameSession}
+                saveRename={renameSession}
+              />
+              <ChatPanel
+                messages={chatMessages}
+                busy={busy}
+                question={question}
+                sessionTitle={session?.title ?? "新对话"}
+                setQuestion={setQuestion}
+                ask={ask}
+                onKeyDown={handleQuestionKeyDown}
+                toggleHistory={() => setSessionHistoryOpen((open) => !open)}
+              />
+            </div>
           </div>
         )}
       </section>
@@ -607,17 +779,92 @@ function pageTitle(page: AdminPage): string {
   return "系统问答";
 }
 
+function SessionHistory(props: {
+  sessions: ChatSession[];
+  activeSessionId: string | null;
+  open: boolean;
+  busy: string;
+  editingSessionId: string | null;
+  editingSessionTitle: string;
+  setEditingSessionTitle: (value: string) => void;
+  newSession: () => void;
+  switchSession: (session: ChatSession) => Promise<void>;
+  beginRename: (session: ChatSession) => void;
+  cancelRename: () => void;
+  saveRename: (session: ChatSession) => Promise<void>;
+}) {
+  const disabled = props.busy !== "";
+  return (
+    <aside className={`session-history${props.open ? " open" : ""}`} aria-label="历史会话">
+      <header className="session-history-header">
+        <h2><History size={18} /> 历史会话</h2>
+        <button className="icon-button" onClick={props.newSession} disabled={disabled} title="新对话" aria-label="新对话">
+          <Plus size={18} />
+        </button>
+      </header>
+      <div className="session-list">
+        {props.sessions.length === 0 && <p className="empty">暂无历史会话</p>}
+        {props.sessions.map((item) => {
+          const editing = props.editingSessionId === item.id;
+          return (
+            <div className={`session-row${props.activeSessionId === item.id ? " active" : ""}`} key={item.id}>
+              {editing ? (
+                <div className="session-edit">
+                  <input
+                    autoFocus
+                    maxLength={sessionTitleMaxLength}
+                    value={props.editingSessionTitle}
+                    onChange={(event) => props.setEditingSessionTitle(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing) return;
+                      if (event.key === "Enter") void props.saveRename(item);
+                      if (event.key === "Escape") props.cancelRename();
+                    }}
+                    aria-label="会话标题"
+                  />
+                  <button className="icon-button" onClick={() => void props.saveRename(item)} disabled={disabled} title="保存标题" aria-label="保存标题"><Check size={16} /></button>
+                  <button className="icon-button subtle" onClick={props.cancelRename} disabled={disabled} title="取消重命名" aria-label="取消重命名"><X size={16} /></button>
+                </div>
+              ) : (
+                <>
+                  <button className="session-select" onClick={() => void props.switchSession(item)} disabled={disabled} title={item.title}>
+                    <strong>{item.title}</strong>
+                    <span>{formatSessionTime(item.createdAt)}</span>
+                  </button>
+                  <button className="icon-button subtle session-rename" onClick={() => props.beginRename(item)} disabled={disabled} title="重命名会话" aria-label={`重命名 ${item.title}`}>
+                    <Pencil size={15} />
+                  </button>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
 function ChatPanel(props: {
   messages: ChatTurn[];
   busy: string;
   question: string;
+  sessionTitle: string;
   setQuestion: (value: string) => void;
   ask: () => Promise<void>;
   onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
+  toggleHistory: () => void;
 }) {
   return (
     <section className="panel chat">
-      <h2><Bot size={18} /> RAG Chat</h2>
+      <header className="chat-header">
+        <div>
+          <h2><Bot size={18} /> RAG Chat</h2>
+          <p>{props.sessionTitle}</p>
+        </div>
+        <button className="icon-button history-toggle" onClick={props.toggleHistory} disabled={props.busy !== ""} title="历史会话" aria-label="历史会话">
+          <History size={18} />
+        </button>
+      </header>
       <div className="conversation">
         {props.messages.length === 0 && <p className="empty">输入问题后开始问答。系统会自动使用你有权限访问的知识库。</p>}
         {props.messages.map((message) => (
