@@ -10,7 +10,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from prometheus_fastapi_instrumentator import Instrumentator
-from .agent import build_agent_response as build_agent_response_from_state
+from .agent import available_capabilities, build_agent_response as build_agent_response_from_state
 from .agent import route_intent, run_agent_graph as run_agent_graph_impl
 from .agent import stream_agent_events, validate_sql
 from .schemas import AgentResponse, AgentState, ChatRequest, IndexRequest, ParseRequest, SearchRequest
@@ -782,6 +782,14 @@ def rag_search(request: SearchRequest) -> dict[str, Any]:
 async def agent_run(request: ChatRequest) -> AgentResponse:
     state = await run_agent_graph(request)
     return build_agent_response(state)
+
+
+@app.get("/ai/capabilities")
+def list_capabilities() -> dict[str, Any]:
+    return {
+        "version": 1,
+        "capabilities": [item.public_metadata(include_schema=True) for item in available_capabilities()],
+    }
 
 
 @app.post("/ai/chat/stream")

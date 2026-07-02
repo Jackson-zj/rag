@@ -50,6 +50,10 @@ class AgentResponse(BaseModel):
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     tool_results: list[dict[str, Any]] = Field(default_factory=list)
     route: str = "rag"
+    selected_capabilities: list[str] = Field(default_factory=list)
+    plan: list[dict[str, Any]] = Field(default_factory=list)
+    planner_mode: str = "fallback"
+    replan_count: int = 0
 
 
 class AgentState(TypedDict, total=False):
@@ -73,3 +77,14 @@ class AgentState(TypedDict, total=False):
     compiled_query: Any
     sql_started: float
     sql_scope: str
+    selected_capabilities: list[str]
+    capability_plan: list[dict[str, Any]]
+    capability_results: list[dict[str, Any]]
+    planner_mode: str
+    replan_count: int
+    execution_count: int
+    executed_capability_keys: list[str]
+    planning_summary: str
+    evaluation: Any
+    should_replan: bool
+    clarification: str

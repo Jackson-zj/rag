@@ -41,6 +41,8 @@ services:
       TEXT2SQL_MAX_REPAIRS: ${TEXT2SQL_MAX_REPAIRS:-1}
       TEXT2SQL_PLANNER_TIMEOUT_SECONDS: ${TEXT2SQL_PLANNER_TIMEOUT_SECONDS:-10}
       TEXT2SQL_PLANNER_MODEL: ${TEXT2SQL_PLANNER_MODEL:-qwen3.7-plus}
+      JAVA_TOOL_BASE_URL: http://backend-java:8080
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
     depends_on:
       - pgvector
     ports:
@@ -60,6 +62,7 @@ services:
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: rag
       RABBITMQ_PASSWORD: rag
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
     depends_on:
       - pgvector
       - ai-service

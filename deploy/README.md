@@ -35,3 +35,13 @@ docker compose --env-file deploy\.env -f deploy\docker-compose.yml up --build
 ```
 
 If you configure a Docker daemon registry mirror instead, no project env file is needed.
+
+## Java Agent capability
+
+The Java document-status Tool is disabled by default. Set one non-empty random service token in `deploy/.env` before starting Compose:
+
+```dotenv
+AGENT_INTERNAL_TOKEN=replace-with-a-long-random-value
+```
+
+Compose injects the same token into the AI and Java services. The AI service uses the fixed `backend-java` service alias and never accepts a model-provided URL or credential.

@@ -56,4 +56,19 @@ class DocumentRepository {
                         rs.getTimestamp("created_at").toInstant()
                 ), id).stream().findFirst();
     }
+
+    Optional<AgentDocumentStatus> getAgentStatus(String id) {
+        return jdbc.query("""
+                SELECT id, knowledge_base_id, filename, status, chunk_count, created_at
+                FROM documents
+                WHERE id = ?
+                """, (rs, rowNum) -> new AgentDocumentStatus(
+                        rs.getString("id"),
+                        rs.getString("knowledge_base_id"),
+                        rs.getString("filename"),
+                        rs.getString("status"),
+                        rs.getInt("chunk_count"),
+                        rs.getTimestamp("created_at").toInstant()
+                ), id).stream().findFirst();
+    }
 }

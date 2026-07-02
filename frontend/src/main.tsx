@@ -112,7 +112,23 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
 
 function summarizeAgentEvent(event: string, data: string): string {
   try {
-    const body = JSON.parse(data) as { name?: string; status?: string; summary?: string; type?: string; filename?: string; score?: number };
+    const body = JSON.parse(data) as {
+      name?: string;
+      status?: string;
+      summary?: string;
+      type?: string;
+      filename?: string;
+      score?: number;
+      capability_id?: string;
+      selected_capabilities?: string[];
+      steps?: Array<{ capability_id?: string }>;
+      replan_count?: number;
+    };
+    if (event === "plan") {
+      const selected = body.selected_capabilities?.join(", ") || "direct";
+      const replans = body.replan_count ? `, replanned ${body.replan_count} time(s)` : "";
+      return `Agent plan: ${selected}${replans}`;
+    }
     if (event === "tool_result") {
       const status = body.status ? ` (${body.status})` : "";
       return `${body.name ?? "tool"}${status}: ${body.summary ?? data}`;
@@ -120,6 +136,7 @@ function summarizeAgentEvent(event: string, data: string): string {
     if (event === "citation") {
       if (body.type === "rag") return `citation: ${body.filename ?? "document"} score=${body.score ?? "-"}`;
       if (body.type === "sql") return `citation: ${body.summary ?? "SQL summary"}`;
+      if (body.type === "java") return `citation: ${body.summary ?? body.capability_id ?? "Java service"}`;
     }
   } catch {
     return data;
@@ -565,7 +582,9 @@ function App() {
           const parsed = parseSseBlock(part);
           if (!parsed) continue;
           if (parsed.event === "tool") pushEvent(`Agent tool: ${parsed.data}`);
-          if (parsed.event === "tool_result" || parsed.event === "citation") pushEvent(summarizeAgentEvent(parsed.event, parsed.data));
+          if (parsed.event === "plan" || parsed.event === "tool_result" || parsed.event === "citation") {
+            pushEvent(summarizeAgentEvent(parsed.event, parsed.data));
+          }
           if (parsed.event === "token") appendAssistantToken(assistantId, parsed.data);
           if (parsed.event === "error") {
             setError(parsed.data);

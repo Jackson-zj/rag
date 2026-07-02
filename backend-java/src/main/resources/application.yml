@@ -28,5 +28,6 @@ management:
 
 rag:
   ai-service-url: ${AI_SERVICE_URL:http://127.0.0.1:8000}
+  agent-internal-token: ${AGENT_INTERNAL_TOKEN:}
   rabbit:
     document-index-queue: document.index

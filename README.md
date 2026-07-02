@@ -29,6 +29,9 @@ flowchart LR
 
 ## Agent MVP
 
+- FastAPI loads a versioned capability registry for RAG, safe Text2SQL, and Java document-status tools. With a model key configured, the Agent first selects capabilities from a compact catalog and then generates a validated execution plan from only the selected schemas.
+- Plans are limited to three steps, five total executions, and one replan. Identity, knowledge-base scope, service URLs, and credentials are injected by trusted code rather than accepted from model arguments.
+- When the model is unavailable or planning fails, the existing deterministic RAG/SQL router remains the local-demo fallback.
 - FastAPI 使用 LangGraph 编排 Agent，并根据问题意图路由到 `rag`、`sql`、`mixed` 或 `direct` 处理流程。
 - `rag_search` Tool 封装原有的向量检索能力，继续执行知识库授权范围和用户权限过滤。
 - `sql_query` Tool 采用混合 Text2SQL 流程：检索业务语义域，先提取并锁定日期、用户名和枚举条件，再由模型或规则生成 QueryPlan，完成合并校验、权限策略注入、参数化 SQL 编译与执行，最后由大模型归纳查询结果。

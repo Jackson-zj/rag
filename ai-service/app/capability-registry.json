@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "capabilities": [
+    {
+      "id": "rag.search.v1",
+      "name": "Search authorized knowledge bases",
+      "description": "Retrieve relevant passages from knowledge bases visible to the current user.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "minLength": 1},
+          "top_k": {"type": "integer", "minimum": 1, "maximum": 5}
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      },
+      "executor": {"type": "handler", "handler": "rag_search"}
+    },
+    {
+      "id": "sql.query.v1",
+      "name": "Query authorized structured business data",
+      "description": "Run the original user question through the safe Text2SQL query-plan and read-only SQL pipeline.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "executor": {"type": "handler", "handler": "sql_query"}
+    },
+    {
+      "id": "document.status.v1",
+      "name": "Get document indexing status",
+      "description": "Query a document's filename, knowledge-base scope, indexing status, chunk count, and creation time by document ID.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {"type": "string", "minLength": 1}
+        },
+        "required": ["document_id"],
+        "additionalProperties": false
+      },
+      "executor": {
+        "type": "http",
+        "service": "backend-java",
+        "method": "GET",
+        "path": "/internal/agent/documents/{document_id}"
+      }
+    }
+  ]
+}
